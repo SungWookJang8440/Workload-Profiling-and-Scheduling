@@ -1,0 +1,54 @@
+server:
+  port: 8000
+
+spring:
+  application:
+    name: gpu-sharing-jang
+  
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/gpu_sharing}
+    username: ${DATABASE_USER:gpu_user}
+    password: ${DATABASE_PW:gpu_password}
+    driver-class-name: org.postgresql.Driver
+    
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    defer-datasource-initialization: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:mySuperSecretKeyThatIsAtLeast32CharactersLongAndSecure}
+  expiration: ${JWT_EXPIRE_HOURS:24}
+  file: ${JWT_SECRET_FILE:/tmp/cloudgpu_jwt_secret}
+
+# External Services
+relay:
+  server-url: ${RELAY_SERVER_URL:http://localhost:5000}
+
+worker:
+  api-port: ${WORKER_API_PORT:5000}
+
+# CORS Configuration
+cors:
+  allowed-origins: 
+    - http://localhost:3000
+    - http://localhost:3001
+    - http://localhost:3002
+    - http://localhost:5173
+    - http://127.0.0.1:3000
+    - http://127.0.0.1:3001
+    - http://127.0.0.1:3002
+    - http://127.0.0.1:5173
+    - http://frontend:3000
+    - http://frontend
+
+logging:
+  level:
+    com.gpu.sharing: DEBUG
+    org.springframework.security: DEBUG

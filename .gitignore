@@ -1,0 +1,46 @@
+# ==========================================
+# Root Gitignore for Workload-Profiling-and-Scheduling
+# ==========================================
+
+# Logs and databases
+*.log
+*.sqlite
+
+# OS and system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE and Editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Node / Frontend dependencies & build outputs
+**/node_modules/
+**/dist/
+**/build/
+.eslintcache
+
+# Java / Maven build outputs
+**/target/
+**/*.class
+**/*.jar
+**/*.war
+**/*.ear
+
+# Environment Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+
+# Archive files (optional, if you do not want to upload the Archive folder to GitHub, uncomment the line below)
+# Archive/

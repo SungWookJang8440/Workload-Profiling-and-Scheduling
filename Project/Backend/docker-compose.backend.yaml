@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: gpu-sharing-jang-db
+    environment:
+      POSTGRES_DB: gpu_sharing
+      POSTGRES_USER: gpu_user
+      POSTGRES_PASSWORD: gpu_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - gpu-sharing-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gpu-sharing-jang-backend
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-jdbc:postgresql://postgres:5432/gpu_sharing}
+      DATABASE_USER: ${DATABASE_USER:-gpu_user}
+      DATABASE_PW: ${DATABASE_PW:-gpu_password}
+      RELAY_SERVER_URL: ${RELAY_SERVER_URL:-http://relay:5000}
+      WORKER_API_PORT: ${WORKER_API_PORT:-5000}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-24}
+      JWT_SECRET_FILE: ${JWT_SECRET_FILE:-/tmp/cloudgpu_jwt_secret}
+    ports:
+      - "${PORT_BACKEND:-8001}:8000"
+    volumes:
+      - jwt_secret:/tmp
+    depends_on:
+      - postgres
+    networks:
+      - gpu-sharing-network
+
+volumes:
+  postgres_data:
+  jwt_secret:
+
+networks:
+  gpu-sharing-network:
+    driver: bridge
