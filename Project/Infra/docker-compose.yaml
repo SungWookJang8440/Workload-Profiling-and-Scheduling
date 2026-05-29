@@ -17,7 +17,7 @@ services:
 
   backend:
     build:
-      context: ./Backend
+      context: ../Backend
       dockerfile: Dockerfile
     container_name: gpu-sharing-backend
     ports:
@@ -44,7 +44,7 @@ services:
 
   frontend:
     build:
-      context: ./Frontend
+      context: ../Frontend
       dockerfile: Dockerfile
     container_name: gpu-sharing-frontend
     ports:

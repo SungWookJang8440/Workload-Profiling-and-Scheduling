@@ -2,6 +2,8 @@
 
 echo "=== Debug Spring Boot Application ==="
 
+cd ../Backend || { echo "Backend directory not found"; exit 1; }
+
 # Check if port 8000 is in use
 echo "Checking port 8000 usage..."
 netstat -tlnp | grep 8000

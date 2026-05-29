@@ -23,11 +23,12 @@ wsl -d Ubuntu docker --version
 
 ## 2. 프로젝트 위치
 
-```
-C:\Users\장성욱\Desktop\ws\GPU-sharing-Jang
+```text
+Project/
+├── Infra/            # 인프라 설정 및 도커 파일 (현재 위치)
+│   └── docker-compose.yaml
 ├── Backend/          # Spring Boot 백엔드
-├── Frontend/         # React 프론트엔드
-└── docker-compose.yaml
+└── Frontend/         # React 프론트엔드
 ```
 
 ---
@@ -37,17 +38,13 @@ C:\Users\장성욱\Desktop\ws\GPU-sharing-Jang
 ### Step 1: Docker Desktop 실행
 Docker Desktop 앱을 먼저 켜세요.
 
-### Step 2: WSL Ubuntu 터미널 열기
+### Step 2: 터미널 열기 및 폴더 이동
 ```powershell
-# PowerShell에서 WSL 진입
-wsl -d Ubuntu
+# 프로젝트의 Infra 폴더로 이동 (경로는 본인 환경에 맞게 수정)
+cd /mnt/c/Users/User/Desktop/종프2/Workload-Profiling-and-Scheduling/Project/Infra
 
-# 프로젝트 폴더로 이동
-cd /mnt/c/Users/장성욱/Desktop/ws/GPU-sharing-Jang
-
-# 현재 위치 확인 (pwd)
-pwd
-# 출력: /mnt/c/Users/장성욱/Desktop/ws/GPU-sharing-Jang
+# 또는 Windows PowerShell 사용 시:
+# cd C:\Users\User\Desktop\종프2\Workload-Profiling-and-Scheduling\Project\Infra
 ```
 
 ### Step 3: 기존 컨테이너 정리 (처음이거나 완전 초기화 시)
