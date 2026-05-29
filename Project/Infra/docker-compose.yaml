@@ -54,6 +54,18 @@ services:
     networks:
       - gpu-sharing-network
 
+  worker:
+    build:
+      context: ../Worker
+      dockerfile: Dockerfile
+    container_name: gpu-sharing-worker
+    ports:
+      - "5000:5000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - gpu-sharing-network
+
 volumes:
   postgres_data:
 
