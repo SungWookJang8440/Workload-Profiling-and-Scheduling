@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from typing import Optional
 import math
 
-
 # ─────────────────────────────────────────────
 # 데이터 구조 정의
 # ─────────────────────────────────────────────
