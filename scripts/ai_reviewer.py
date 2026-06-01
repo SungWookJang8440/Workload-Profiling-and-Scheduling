@@ -9,8 +9,18 @@ def main():
     pr_number = os.environ.get("PR_NUMBER")
     repo = os.environ.get("REPO_FULL_NAME")
 
-    if not all([gemini_key, github_token, pr_number, repo]):
-        print("필수 환경 변수가 누락되었습니다.")
+    missing_vars = []
+    if not gemini_key:
+        missing_vars.append("GEMINI_API_KEY")
+    if not github_token:
+        missing_vars.append("GITHUB_TOKEN")
+    if not pr_number:
+        missing_vars.append("PR_NUMBER")
+    if not repo:
+        missing_vars.append("REPO_FULL_NAME")
+
+    if missing_vars:
+        print(f"필수 환경 변수가 누락되었습니다: {', '.join(missing_vars)}")
         sys.exit(1)
 
     headers = {
