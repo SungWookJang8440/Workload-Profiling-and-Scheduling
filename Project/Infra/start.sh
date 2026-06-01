@@ -4,6 +4,8 @@
 
 echo "Starting GPU Sharing Jang Backend..."
 
+cd ../Backend || { echo "Backend directory not found"; exit 1; }
+
 # Check if .env file exists
 if [ ! -f .env ]; then
     echo "Creating .env file from template..."

@@ -17,7 +17,7 @@ services:
 
   backend:
     build:
-      context: ./Backend
+      context: ../Backend
       dockerfile: Dockerfile
     container_name: gpu-sharing-backend
     ports:
@@ -44,13 +44,25 @@ services:
 
   frontend:
     build:
-      context: ./Frontend
+      context: ../Frontend
       dockerfile: Dockerfile
     container_name: gpu-sharing-frontend
     ports:
       - "4000:80"
     depends_on:
       - backend
+    networks:
+      - gpu-sharing-network
+
+  worker:
+    build:
+      context: ../Worker
+      dockerfile: Dockerfile
+    container_name: gpu-sharing-worker
+    ports:
+      - "5000:5000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - gpu-sharing-network
 
