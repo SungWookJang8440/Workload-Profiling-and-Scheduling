@@ -21,13 +21,18 @@ public class GpuMonitorService {
     private static final Logger log = LoggerFactory.getLogger(GpuMonitorService.class);
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
-    public void startMonitoring(SseEmitter emitter, String ip, int port, String user, String password) {
+    public void startMonitoring(SseEmitter emitter, String ip, int port, String user, String password, String keyPath) {
         executor.execute(() -> {
             Session session = null;
             try {
                 JSch jsch = new JSch();
+                if (keyPath != null && !keyPath.isEmpty()) {
+                    jsch.addIdentity(keyPath);
+                }
                 session = jsch.getSession(user, ip, port);
-                session.setPassword(password);
+                if (password != null && !password.isEmpty()) {
+                    session.setPassword(password);
+                }
 
                 Properties config = new Properties();
                 config.put("StrictHostKeyChecking", "no");
