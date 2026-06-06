@@ -120,6 +120,27 @@ class ApiClient {
     return response.data;
   }
 
+  // Scheduler APIs
+  async getSchedulerStatus() {
+    const response = await this.client.get('/scheduler/status');
+    return response.data;
+  }
+
+  async submitSchedulerJob(prompt: string) {
+    const response = await this.client.post('/scheduler/submit', { prompt });
+    return response.data;
+  }
+
+  async tickScheduler() {
+    const response = await this.client.post('/scheduler/tick');
+    return response.data;
+  }
+
+  async resetScheduler() {
+    const response = await this.client.post('/scheduler/reset');
+    return response.data;
+  }
+
   // Health Check
   async healthCheck() {
     const response = await this.client.get('/health');

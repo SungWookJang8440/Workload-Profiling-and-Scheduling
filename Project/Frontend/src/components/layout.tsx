@@ -26,6 +26,7 @@ const sidebarItems = [
   { icon: Box, label: '내 컨테이너', href: '/containers' },
   { icon: Server, label: '클러스터', href: '/clusters' },
   { icon: Layers, label: '템플릿', href: '/templates' },
+  { icon: Cpu, label: 'MCDM 스케줄러', href: '/scheduler' },
 ];
 
 function SidebarItem({ icon: Icon, label, href, isActive, collapsed }: {
