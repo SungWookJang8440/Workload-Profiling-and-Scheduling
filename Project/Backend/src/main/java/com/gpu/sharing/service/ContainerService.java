@@ -2,6 +2,8 @@ package com.gpu.sharing.service;
 
 import com.gpu.sharing.dto.CreateContainerRequest;
 import com.gpu.sharing.entity.Session;
+import com.gpu.sharing.entity.Cluster;
+import com.gpu.sharing.repository.ClusterRepository;
 import com.gpu.sharing.repository.SessionRepository;
 import com.gpu.sharing.security.CustomUserDetailsService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +26,9 @@ public class ContainerService {
     
     @Autowired
     private SessionRepository sessionRepository;
+    
+    @Autowired
+    private ClusterRepository clusterRepository;
     
     @Autowired
     private CustomUserDetailsService userDetailsService;
@@ -104,8 +109,12 @@ public class ContainerService {
                 throw new RuntimeException("Session has no cluster information");
             }
             
+            // Fetch cluster to get the actual IP
+            Cluster cluster = clusterRepository.findById(session.getClusterId())
+                    .orElseThrow(() -> new RuntimeException("Associated cluster not found"));
+            
             // Build worker URL (we need cluster IP address)
-            String workerUrl = workerService.buildWorkerUrl("127.0.0.1"); // This needs to be updated with actual cluster IP
+            String workerUrl = workerService.buildWorkerUrl(cluster.getIpAddress());
             
             // Delete container from worker
             Map<String, Object> response = workerService.deleteContainer(workerUrl, containerId).block();
