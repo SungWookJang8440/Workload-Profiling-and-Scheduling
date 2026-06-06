@@ -18,7 +18,7 @@ jobs:
       - name: Analyze and Comment
         uses: actions/github-script@v7
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.JONGPROJECT2_KEY }}
         with:
           script: |
             const issue = context.payload.issue || context.payload.pull_request;
