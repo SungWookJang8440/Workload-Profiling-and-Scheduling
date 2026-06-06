@@ -1,0 +1,235 @@
+name: Gemini Issue Analyzer
+
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  analyze-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Analyze and Comment
+        uses: actions/github-script@v7
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        with:
+          script: |
+            // If it is an issue_comment event, check if the comment is '/analyze'
+            if (context.eventName === 'issue_comment') {
+              const commentBody = context.payload.comment.body.trim();
+              if (commentBody !== '/analyze') {
+                console.log('Comment is not "/analyze". Skipping analysis.');
+                return;
+              }
+            }
+
+            const issue = context.payload.issue || context.payload.pull_request;
+            if (!issue) {
+              console.log('No issue or pull request found in context.');
+              return;
+            }
+            const issueTitle = issue.title;
+            const issueBody = issue.body || 'No description provided.';
+            const issueNumber = issue.number;
+            
+            console.log(`Analyzing issue #${issueNumber}: ${issueTitle}`);
+            
+            // 1. Fetch other recent issues/PRs to analyze redundancy/conflict
+            let otherIssues = 'None';
+            try {
+              const issuesResponse = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'all',
+                per_page: 30
+              });
+              otherIssues = issuesResponse.data
+                .filter(i => i.number !== issueNumber)
+                .map(i => `#${i.number} (${i.state}): ${i.title}`)
+                .join('\n');
+            } catch (err) {
+              console.warn('Failed to fetch recent issues list:', err.message);
+            }
+
+            // 2. Determine if it is a Pull Request and get PR details
+            let isPR = false;
+            let prDetails = null;
+            if (context.payload.pull_request) {
+              isPR = true;
+              prDetails = context.payload.pull_request;
+            } else if (context.payload.issue && context.payload.issue.pull_request) {
+              isPR = true;
+              try {
+                const prResponse = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: issueNumber
+                });
+                prDetails = prResponse.data;
+              } catch (err) {
+                console.warn('Failed to fetch PR details:', err.message);
+              }
+            }
+
+            // 3. Detect Merge Conflicts if it is a Pull Request
+            let conflictDetails = '';
+            let isConflicted = false;
+            if (isPR && prDetails) {
+              const baseBranch = prDetails.base.ref;
+              const headSha = prDetails.head.sha;
+              const execSync = require('child_process').execSync;
+              
+              try {
+                console.log(`Checking out PR head SHA: ${headSha}`);
+                // Configure git user
+                execSync('git config user.name "github-actions[bot]"');
+                execSync('git config user.email "github-actions[bot]@users.noreply.github.com"');
+                
+                // Checkout the head commit of the PR
+                execSync(`git checkout ${headSha}`);
+                
+                console.log(`Checking mergeability against base branch: ${baseBranch}`);
+                execSync(`git fetch origin ${baseBranch}`);
+                execSync(`git merge origin/${baseBranch}`);
+                console.log('No merge conflicts detected.');
+              } catch (mergeErr) {
+                isConflicted = true;
+                console.log('Merge conflict detected in runner.');
+                try {
+                  const conflictedFiles = execSync('git diff --name-only --diff-filter=U')
+                    .toString()
+                    .trim()
+                    .split('\n')
+                    .filter(Boolean);
+                  
+                  conflictDetails = '\n\n### ⚠️ 머지 충돌(Merge Conflict) 감지됨\n';
+                  conflictDetails += '이 PR은 대상 브랜치와 병합 시 다음 파일들에서 충돌이 발생합니다:\n';
+                  
+                  for (const file of conflictedFiles) {
+                    conflictDetails += `- \`${file}\`\n`;
+                    const content = require('fs').readFileSync(file, 'utf8');
+                    const lines = content.split('\n');
+                    let inConflict = false;
+                    let conflictBlock = [];
+                    let blockCount = 0;
+                    
+                    conflictDetails += '  ```diff\n';
+                    for (const line of lines) {
+                      if (line.startsWith('<<<<<<<')) {
+                        inConflict = true;
+                        conflictBlock.push(line);
+                      } else if (line.startsWith('>>>>>>>')) {
+                        inConflict = false;
+                        conflictBlock.push(line);
+                        conflictDetails += conflictBlock.join('\n') + '\n';
+                        conflictBlock = [];
+                        blockCount++;
+                        if (blockCount >= 3) {
+                          conflictDetails += '  ... (일부 충돌 구간 생략됨)\n';
+                          break;
+                        }
+                      } else if (inConflict) {
+                        conflictBlock.push(line);
+                      }
+                    }
+                    conflictDetails += '  ```\n';
+                  }
+                } catch (diffErr) {
+                  console.error('Failed to parse merge conflict details:', diffErr.message);
+                }
+              }
+            }
+
+            // 4. Prepare System and User prompt
+            let systemPrompt = `너는 Senior 소프트웨어 엔지니어이자 프로젝트 매니저야.
+            새로운 이슈/PR이 등록되었을 때, 다른 최근 이슈 목록과 머지 충돌 사항을 참고하여 아래 형식으로 리포트를 한국어로 작성해줘.
+            
+            ✨ Gemini AI (3.1 Flash Lite) 이슈 분석 리포트 ✨
+            
+            안녕하세요. 프로젝트의 안정적인 운영을 위해 이슈/PR을 꼼꼼히 검토해 보았습니다. 요청하신 #${issueNumber}번 작업에 대한 분석 결과입니다.
+            
+            1. 중복성 분석
+            - 결과: [중복 없음 / 일부 연관성 있음 / 중복 가능성 높음] 중 하나 선택
+            - 상세: [기존 이슈들과의 관계를 분석하여 설명. 연관이 있다면 해당 이슈 번호(#번호)를 언급하며 연관성 설명]
+            
+            2. 충돌 가능성 분석
+            - 결과: [안전 / 주의 필요 / 충돌 발생함] 중 하나 선택
+            - 상세: [이슈나 PR이 최근의 다른 이슈나 코드 변경점들과 기술적/논리적으로 충돌할 소지가 있는지 설명]`;
+
+            if (isConflicted) {
+              systemPrompt += `\n\n또한, 이번 PR에서 머지 충돌(Merge Conflict)이 실제 발생했습니다. 제공된 충돌 구간 소스코드(<<<<<<< ~ >>>>>>>)를 분석하여:
+              1. 양쪽 변경 사항이 각각 무엇을 의도한 것인지 설명해주고,
+              2. 이 충돌을 해결하기 위해 어떻게 병합해야 하는지 구체적인 가이드와 병합 완료된 소스코드 예시를 작성해줘.`;
+            }
+
+            systemPrompt += `\n\n💡 시니어 엔지니어의 제언
+            [이슈 해결을 위한 핵심 조언, 권장 절차 및 머지 충돌이 있다면 해결 조언 작성]`;
+
+            const userPrompt = `[분석 대상 작업]
+            번호: #${issueNumber}
+            제목: ${issueTitle}
+            본문:
+            ${issueBody}
+            ${conflictDetails}
+            
+            [최근 등록된 다른 이슈 목록]
+            ${otherIssues}`;
+
+            // 5. Request Gemini API
+            let resultText = '';
+            try {
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  contents: [
+                    {
+                      role: 'user',
+                      parts: [
+                        { text: `${systemPrompt}\n\n분석할 내용:\n${userPrompt}` }
+                      ]
+                    }
+                  ]
+                })
+              });
+              
+              if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Gemini API returned status ${response.status}: ${errorText}`);
+              }
+              
+              const data = await response.json();
+              resultText = data.candidates[0].content.parts[0].text;
+            } catch (err) {
+              console.error('Gemini API call failed:', err);
+              resultText = `❌ Gemini AI 분석 중 오류가 발생했습니다: ${err.message}`;
+            }
+
+            // 6. Create comment on the issue/PR
+            try {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: resultText
+              });
+              console.log('Successfully posted comment.');
+            } catch (err) {
+              console.error('Failed to post comment on issue/PR:', err);
+            }
