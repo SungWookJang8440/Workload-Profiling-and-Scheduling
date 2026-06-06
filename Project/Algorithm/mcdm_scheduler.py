@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 import math
 
+
 # ─────────────────────────────────────────────
 # 데이터 구조 정의
 # ─────────────────────────────────────────────
@@ -26,7 +27,7 @@ class GPU:
     id: str                      # GPU 식별자 (예: "g0", "g1", ...)
     name: str                    # GPU 이름 (예: "NVIDIA H100")
     cost_per_hour: float         # 시간당 비용 (달러)
-    tdp_watts: float             # 최대 전력 소비 (W)
+    watts: float             # 최대 전력 소비 (W)
 
 
 @dataclass
@@ -55,7 +56,7 @@ class PerformanceMatrix:
 @dataclass
 class SMUtilizationMatrix:
     """
-    SM 시용룰 헹랼 (Figure 3 heatmap 실측값)
+    SM 시용룰 헹렬
     data[workload_id][gpu_id] = SM utilization (%)
     """
     data: dict[str, dict[str, float]] = field(default_factory=dict)
@@ -69,7 +70,18 @@ class MemUtilizationMatrix:
     """
     메모리 사용률 행렬
     data[workload_id][gpu_id] = memory utilization (%)
-    논문에 없는 값은 #주석 표기
+    """
+    data: dict[str, dict[str, float]] = field(default_factory=dict)
+
+    def get(self, workload_id: str, gpu_id: str) -> float:
+        return self.data.get(workload_id, {}).get(gpu_id, 0.0)
+
+
+@dataclass
+class LatencyMatrix:
+    """
+    처리 시간 행렬
+    data[workload_id][gpu_id] = latency (sec)
     """
     data: dict[str, dict[str, float]] = field(default_factory=dict)
 
@@ -80,6 +92,12 @@ class MemUtilizationMatrix:
 # ─────────────────────────────────────────────
 # 4가지 기준 점수 계산 함수
 # ─────────────────────────────────────────────
+
+'''
+# 원래 논문 방식인데 GPU개수가 적으면 각 GPU마다 격차가 너무 크게 나옴
+# score_performance 방식은 계산 방식 변경, cost와 power는 sqrt로 정규화하여 격차 완화
+# cost와 watts를 제곱해서 사용해서 비용 / 와트 페널티 증가
+
 
 def score_performance(
     workload: Workload,
@@ -105,6 +123,29 @@ def score_performance(
         return 100.0
 
     return (p_ij - p_min) / (p_max - p_min) * 100.0
+'''
+
+def score_performance(
+    workload: Workload,
+    gpu: GPU,
+    perf_matrix: PerformanceMatrix,
+) -> float:
+    """
+    S_perf(w_i, g_j) = sqrt(P_ij / P_i,max) * 100
+
+    최고 성능 GPU를 기준으로 비선형 정규화 방식을 사용하여 성능 차이가 지나치게 확대되는 것을 방지
+    """
+    throughputs = perf_matrix.throughput_for_workload(workload.id)
+    if not throughputs:
+        return 0.0
+
+    p_ij = perf_matrix.get(workload.id, gpu.id)
+    p_max = max(throughputs.values())
+
+    if math.isclose(p_max, 0.0):
+        return 0.0
+
+    return math.sqrt(p_ij / p_max) * 100.0
 
 
 def _sm_fit_score(u_sm: float) -> float:
@@ -128,14 +169,14 @@ def _mem_fit_score(u_mem: float) -> float:
     SM 점수와 동일한 구간 구조를 메모리 범위에 적용
       - U_mem < 55%      : (U_mem / 55) * 100
       - 55% ≤ U_mem ≤ 75%: 100
-      - U_mem > 75%      : 100 - ((U_mem - 75) / 25) * 100
+      - U_mem > 75%      : 100 - ((U_mem - 75) / 25) * 50
     """
     if u_mem < 55.0:
         return (u_mem / 55.0) * 100.0
     elif u_mem <= 75.0:
         return 100.0
     else:
-        return max(0.0, 100.0 - ((u_mem - 75.0) / 25.0) * 100.0)
+        return max(0.0, 100.0 - ((u_mem - 75.0) / 25.0) * 50.0)
 
 
 def score_resource_fit(
@@ -167,19 +208,19 @@ def score_cost_efficiency(
     """
     S_cost(w_i, g_j) = (P_ij / c_j) / max_{g_k ∈ G}(P_ik / c_k) * 100
 
-    달러당 처리량을 전체 GPU 중 최대값으로 정규화.
+    달러당 처리량을 전체 GPU 중 최대값으로 정규화 + 분모 제곱으로 페널티 강화 및 제곱근으로 격차 완화
     """
     
     # throughput per dollar (달러당 처리량 함수)
     def tpd(g) -> float:
-        return perf_matrix.get(workload.id, g.id) / g.cost_per_hour if g.cost_per_hour > 0 else 0.0
+        return perf_matrix.get(workload.id, g.id) / (g.cost_per_hour**2) if g.cost_per_hour > 0 else 0.0
 
     # 현재 GPU의 처리량/비용
     tpd_j = tpd(gpu)
 
     # 전체 GPU 중 최대 처리량/비용
     max_tpd = max(tpd(g) for g in gpu_list) or 1.0
-    return (tpd_j / max_tpd) * 100.0
+    return math.sqrt(tpd_j / max_tpd) * 100.0
 
 
 def score_power_efficiency(
@@ -189,17 +230,17 @@ def score_power_efficiency(
     gpu_list: list,
 ) -> float:
     """
-    S_power(w_i, g_j) = P_ij / TDP_j
+    S_power(w_i, g_j) = (P_ij / watts_j) / max_{g_k ∈ G}(P_ik / watts_k) * 100
     
-    와트당 처리량 (정규화)
+    와트당 처리량 (정규화) + 분모 제곱으로 페널티 강화 및 제곱근으로 격차 완화
     """
      # throughput per watt (와트당 처리량 함수)
     def tpw(g) -> float:
-        return perf_matrix.get(workload.id, g.id) / g.tdp_watts if g.tdp_watts > 0 else 0.0
+        return perf_matrix.get(workload.id, g.id) / (g.watts**2) if g.watts > 0 else 0.0
 
     tpw_j = tpw(gpu)
     max_tpw = max(tpw(g) for g in gpu_list) or 1.0
-    return (tpw_j / max_tpw) * 100.0
+    return  math.sqrt(tpw_j / max_tpw) * 100.0
 
 
 # ─────────────────────────────────────────────
@@ -222,9 +263,9 @@ class MCDMScheduler:
     Multi-Criteria Decision Making GPU Scheduler
 
     가중치:
-      w_perf  = 0.20
-      w_fit   = 0.50  ← 자원 매칭을 가장 중요시
-      w_cost  = 0.20
+      w_perf  = 0.15
+      w_fit   = 0.60  ← 자원 매칭을 가장 중요시
+      w_cost  = 0.15
       w_power = 0.10
     """
 
@@ -235,10 +276,11 @@ class MCDMScheduler:
         perf_matrix: PerformanceMatrix,
         sm_matrix: SMUtilizationMatrix,
         mem_matrix: MemUtilizationMatrix,
+        sec_matrix: LatencyMatrix,
         
-        w_perf: float = 0.20,
-        w_fit: float = 0.5,
-        w_cost: float = 0.20,
+        w_perf: float = 0.15,
+        w_fit: float = 0.60,
+        w_cost: float = 0.15,
         w_power: float = 0.10,
     ):
         self.gpus = gpus
@@ -246,6 +288,7 @@ class MCDMScheduler:
         self.perf_matrix = perf_matrix
         self.sm_matrix = sm_matrix
         self.mem_matrix = mem_matrix
+        self.sec_matrix = sec_matrix
         
         self.w_perf = w_perf
         self.w_fit = w_fit
@@ -318,6 +361,7 @@ def print_schedule_result(
     workload: Workload,
     assigned_gpu: GPU,
     scores: list[ScoreDetail],
+    latency: float,
     show_all: bool = True,
 ) -> None:
     sep = "─" * 72
@@ -340,156 +384,232 @@ def print_schedule_result(
         )
 
     print(sep)
-    print(f"  ✔  할당 GPU: {assigned_gpu.name}  (총점: {scores[0].s_total:.1f})")
+    print(f"  ✔  할당 GPU: {assigned_gpu.name}  (총점: {scores[0].s_total:.1f})  |  처리시간: {latency:.4f} sec")
     print()
 
 
 # ─────────────────────────────────────────────
-# 데모 실행
+# 데이터 초기화 (baseline_merged.csv 실측값)
 # ─────────────────────────────────────────────
-
-def main():
-    print("=" * 72)
-    print("  MCDM GPU Scheduler  :  다기준 의사결정 GPU 스케줄링 알고리즘")
-    print("  가중치: w_perf=0.20 | w_fit=0.50 | w_cost=0.20 | w_power=0.10")
-    print("=" * 72)
-
+ 
+def build_scheduler() -> tuple[MCDMScheduler, list[Workload]]:
+    """GPU, 워크로드, 행렬 데이터를 초기화하고 스케줄러를 반환"""
+ 
     # ── GPU 클러스터 정의 ──────────────────────────────────────────
-    # 출처: Table II (GPU Hardware Specifications)
-    # cost: Table II / tdp_watts: 논문에 데이터 없어서 임의로
-    
+    # cost_per_hour: Table II / watts: 검색값
     gpus = [
         GPU(id="g0", name="RTX 3090",
-            cost_per_hour=1.00,   # Table II
-            tdp_watts=350),        # 논문에 데이터 없어서 임의로
-
+            cost_per_hour=1.00,
+            watts=350),
         GPU(id="g1", name="RTX 4090",
-            cost_per_hour=2.50,   # Table II
-            tdp_watts=450),        # 논문에 데이터 없어서 임의로 
-
-        GPU(id="g2", name="A100-80GB",
-            cost_per_hour=3.00,   # Table II
-            tdp_watts=400),        # 논문에 데이터 없어서 임의로
-
-        GPU(id="g3", name="H200",
-            cost_per_hour=6.00,   # Table II
-            tdp_watts=700),        # 논문에 데이터 없어서 임의로
-
-        GPU(id="g4", name="RTX 6000",
-            cost_per_hour=5.00,   # Table II
-            tdp_watts=300),        # 논문에 데이터 없어서 임의로
+            cost_per_hour=2.50,
+            watts=450),
+        GPU(id="g2", name="RTX 6000",
+            cost_per_hour=5,
+            watts=600),
     ]
-
+ 
     # ── 작업 목록 ──────────────────────────────────────────────────
-    # 출처: Table I (Workload Suite Coverage) — 논문에 존재하는 workload만 사용
-    
     workloads = [
-        Workload(id="w0", name="BERT-Base Inference (batch16)"),
-        Workload(id="w1", name="BERT-Base Train (batch16)"),
-        Workload(id="w2", name="ResNet-50 Train (batch128)"),
+        Workload(id="w0",  name="resnet50-train (batch32)"),
+        Workload(id="w1",  name="resnet50-train (batch64)"),
+        Workload(id="w2",  name="resnet50-train (batch128)"),
+        Workload(id="w3",  name="bert-base-cased-train (batch8)"),
+        Workload(id="w4",  name="bert-base-cased-train (batch16)"),
+        Workload(id="w5",  name="bert-base-cased-train (batch32)"),
+        Workload(id="w6",  name="openai-whisper-large-v2-inf (batch4)"),
+        Workload(id="w7",  name="openai-whisper-large-v2-inf (batch8)"),
+        Workload(id="w8",  name="openai-whisper-large-v2-inf (batch16)"),
+        Workload(id="w9",  name="google-mobilenet_v2-inf (batch16)"),
+        Workload(id="w10", name="google-mobilenet_v2-inf (batch32)"),
+        Workload(id="w11", name="google-mobilenet_v2-inf (batch64)"),
+        Workload(id="w12", name="google-vit-base-patch16-224-inf (batch8)"),
+        Workload(id="w13", name="google-vit-base-patch16-224-inf (batch16)"),
+        Workload(id="w14", name="google-vit-base-patch16-224-inf (batch32)"),
+        Workload(id="w15", name="bert-base-cased-inf (batch16)"),
+        Workload(id="w16", name="bert-base-cased-inf (batch32)"),
+        Workload(id="w17", name="bert-base-cased-inf (batch64)"),
     ]
-
-    # ── GPUBench 처리량 행렬 (samples/sec) ────────────────────────
-    # throughput = cost_efficiency * cost_per_hour
-    # 출처: Table IV (cost efficiency) ,TAable II (GPU별 cost_per_hour)
-    
+ 
+    # ── 처리량 행렬 (Exclusive100, samples/sec) ───────────────────
     perf_matrix = PerformanceMatrix(data={
-        "w0": {  # BERT-Base Inference batch16 — Table IV
-            "g0": 147.0 * 1.00,   # RTX 3090  → 147.0  samples/s
-            "g1": 98.3  * 2.50,   # RTX 4090  → 245.75 samples/s
-            "g2": 48.7  * 3.00,   # A100      → 146.1  samples/s
-            "g3": 66.3  * 6.00,   # H200      → 397.8  samples/s
-            "g4": 85.0  * 5.00,   # RTX 6000  → 425.0  samples/s
-        },
-        "w1": {  # BERT-Base Train batch16 — Table IV
-            "g0": 49.9  * 1.00,   # RTX 3090  → 49.9   samples/s
-            "g1": 33.0  * 2.50,   # RTX 4090  → 82.5   samples/s
-            "g2": 15.6  * 3.00,   # A100      → 46.8   samples/s
-            "g3": 21.9  * 6.00,   # H200      → 131.4  samples/s
-            "g4": 30.3  * 5.00,   # RTX 6000  → 151.5  samples/s
-        },
-        "w2": {  # ResNet-50 Train batch128 — Table IV
-            "g0": 5408.7 * 1.00,  # RTX 3090  → 5408.7 samples/s
-            "g1": 2122.1 * 2.50,  # RTX 4090  → 5305.25 samples/s
-            "g2": 1903.8 * 3.00,  # A100      → 5711.4  samples/s
-            "g3": 697.0  * 6.00,  # H200      → 4182.0  samples/s
-            "g4": 1520.7 * 5.00,  # RTX 6000  → 7603.5  samples/s
-        },
+        "w0":  {"g0": 1638.02, "g1": 1430.12, "g2": 1658.52},
+        "w1":  {"g0": 3205.87, "g1": 2797.31, "g2": 1491.43},
+        "w2":  {"g0": 5408.68, "g1": 5103.74, "g2": 1351.44},
+        "w3":  {"g0":   46.83, "g1":   71.64, "g2": 498.11},
+        "w4":  {"g0":   49.91, "g1":   83.18, "g2": 676.18},
+        "w5":  {"g0":   51.55, "g1":   84.09, "g2": 787.51},
+        "w6":  {"g0":    5.40, "g1":    7.25, "g2": 743.15},
+        "w7":  {"g0":    5.74, "g1":    9.58, "g2": 907.26},
+        "w8":  {"g0":    5.88, "g1":    9.04, "g2": 970.49},
+        "w9":  {"g0":  273.20, "g1":  210.35, "g2": 12483.96},
+        "w10": {"g0":  253.20, "g1":  214.84, "g2": 13250.14},
+        "w11": {"g0":  258.63, "g1":  201.83, "g2": 11641.03},
+        "w12": {"g0":  192.82, "g1":  195.48, "g2": 1176.46},
+        "w13": {"g0":  196.58, "g1":  197.50, "g2": 1246.63},
+        "w14": {"g0":  181.65, "g1":  180.81, "g2": 1254.23},
+        "w15": {"g0":  146.98, "g1":  245.91, "g2": 1768.03},
+        "w16": {"g0":  150.32, "g1":  244.78, "g2": 1857.49},
+        "w17": {"g0":  151.35, "g1":  243.21, "g2": 1897.73},
     })
-    
-    # ── SM 사용률 / 메모리 사용률 행렬 ──────────────────────────────
-    # 출처: Figure 3 heatmap
+ 
+    # ── SM 사용률 행렬 (sm%) ──────────────────────────────────────
     sm_matrix = SMUtilizationMatrix(data={
-        "w0": {  # BERT-Base Inf b16
-            "g0": 23.2,  # RTX 3090
-            "g1": 48.5,  # RTX 4090
-            "g2": 41.4,  # A100
-            "g3": 14.3,  # H200
-            "g4": 2.9,   # RTX 6000
-        },
-        "w1": {  # BERT-Base Train b16
-            "g0": 39.5,  # RTX 3090
-            "g1": 80.5,  # RTX 4090
-            "g2": 84.8,  # A100
-            "g3": 64.2,  # H200
-            "g4": 55.5,  # RTX 6000
-        },
-        "w2": {  # ResNet-50 Train b128
-            "g0": 34.3,  # RTX 3090
-            "g1": 58.6,  # RTX 4090
-            "g2": 54.6,  # A100
-            "g3": 20.7,  # H200
-            "g4": 41.5,  # RTX 6000
-        },
+        "w0":  {"g0": 22.11, "g1": 33.66, "g2": 97.00},
+        "w1":  {"g0": 30.46, "g1": 41.68, "g2": 98.77},
+        "w2":  {"g0": 34.33, "g1": 56.30, "g2": 99.00},
+        "w3":  {"g0": 32.58, "g1": 66.29, "g2": 88.24},
+        "w4":  {"g0": 39.49, "g1": 81.67, "g2": 71.46},
+        "w5":  {"g0": 44.11, "g1": 88.70, "g2": 90.55},
+        "w6":  {"g0": 39.56, "g1": 59.84, "g2": 48.00},
+        "w7":  {"g0": 43.75, "g1": 78.38, "g2": 2.00},
+        "w8":  {"g0": 46.76, "g1": 87.68, "g2": 91.27},
+        "w9":  {"g0":  2.34, "g1":  2.25, "g2": 99.00},
+        "w10": {"g0":  3.00, "g1":  3.13, "g2": 99.00},
+        "w11": {"g0":  4.45, "g1":  4.08, "g2": 97.91},
+        "w12": {"g0":  6.85, "g1":  8.33, "g2": 97.64},
+        "w13": {"g0":  8.58, "g1": 12.29, "g2": 98.92},
+        "w14": {"g0": 11.33, "g1": 15.04, "g2": 99.90},
+        "w15": {"g0": 23.19, "g1": 43.53, "g2": 30.95},
+        "w16": {"g0": 32.94, "g1": 65.33, "g2": 98.94},
+        "w17": {"g0": 40.23, "g1": 77.59, "g2": 83.82},
+    })
+ 
+    # ── 메모리 사용률 행렬 (mem%) ─────────────────────────────────
+    mem_matrix = MemUtilizationMatrix(data={
+        "w0":  {"g0": 10.00, "g1": 14.64, "g2": 80.36},
+        "w1":  {"g0": 11.00, "g1": 15.13, "g2": 88.07},
+        "w2":  {"g0": 12.26, "g1": 15.24, "g2": 91.21},
+        "w3":  {"g0": 19.34, "g1": 41.12, "g2": 21.42},
+        "w4":  {"g0": 21.40, "g1": 56.21, "g2": 18.23},
+        "w5":  {"g0": 23.85, "g1": 66.37, "g2": 25.37},
+        "w6":  {"g0": 19.58, "g1": 36.04, "g2": 11.00},
+        "w7":  {"g0": 19.59, "g1": 45.34, "g2": 0.01},
+        "w8":  {"g0": 20.48, "g1": 51.43, "g2": 28.82},
+        "w9":  {"g0":  2.09, "g1":  1.13, "g2": 92.00},
+        "w10": {"g0":  2.51, "g1":  2.22, "g2": 92.00},
+        "w11": {"g0":  3.93, "g1":  3.38, "g2": 87.09},
+        "w12": {"g0":  2.94, "g1":  2.33, "g2": 39.93},
+        "w13": {"g0":  4.72, "g1":  4.94, "g2": 18.62},
+        "w14": {"g0":  5.44, "g1":  7.00, "g2": 18.90},
+        "w15": {"g0": 12.17, "g1": 27.80, "g2": 5.37},
+        "w16": {"g0": 17.19, "g1": 46.90, "g2": 16.63},
+        "w17": {"g0": 21.61, "g1": 52.41, "g2": 18.44},
     })
     
-    # 논문에 데이터 없어서 임의로
-    mem_matrix = MemUtilizationMatrix(data={
-        "w0": {  # BERT-Base Inf b16
-            "g0": 15.0,
-            "g1": 20.0,
-            "g2": 11.3,   # V-C절 평균값 사용
-            "g3": 4.9,    # V-C절 평균값 사용
-            "g4": 10.0,
-        },
-        "w1": {  # BERT-Base Train b16
-            "g0": 15.0,
-            "g1": 20.0,
-            "g2": 11.3,   # V-C절 평균값 사용
-            "g3": 4.9,    # V-C절 평균값 사용
-            "g4": 10.0,
-        },
-        "w2": {  # ResNet-50 Train b128
-            "g0": 15.0,
-            "g1": 20.0,
-            "g2": 11.3,   # V-C절 평균값 사용
-            "g3": 4.9,    # V-C절 평균값 사용
-            "g4": 10.0,
-        },
+    # ── 처리시간 행렬 (sec) ─────────────────────────────────
+    latency_matrix = LatencyMatrix(data={
+        "w0":  {"g0": 1.9535, "g1": 2.2376, "g2": 1.9294},
+        "w1":  {"g0": 1.9963, "g1": 2.2879, "g2": 4.2911},
+        "w2":  {"g0": 2.3665, "g1": 2.5080, "g2": 9.4712},
+        "w3":  {"g0": 17.0827,"g1": 11.1672,"g2": 1.6060},
+        "w4":  {"g0": 32.0577,"g1": 19.2354,"g2": 2.3660},
+        "w5":  {"g0": 62.0757,"g1": 38.0545,"g2": 4.0634},
+        "w6":  {"g0": 74.0741,"g1": 55.1724,"g2": 0.5382},
+        "w7":  {"g0": 139.3574,"g1": 83.5073,"g2": 0.8817},
+        "w8":  {"g0": 272.1088,"g1": 176.9912,"g2": 1.6487},
+        "w9":  {"g0": 5.8566, "g1": 7.6065, "g2": 0.1282},
+        "w10": {"g0": 12.6374,"g1": 14.8951,"g2": 0.2415},
+        "w11": {"g0": 24.7499,"g1": 31.7096,"g2": 0.5497},
+        "w12": {"g0": 4.1488, "g1": 4.0924, "g2": 0.6800},
+        "w13": {"g0": 8.1393, "g1": 8.1013, "g2": 1.2835},
+        "w14": {"g0": 17.6155,"g1": 17.6984,"g2": 2.5516},
+        "w15": {"g0": 10.8858,"g1": 6.5065, "g2": 0.9049},
+        "w16": {"g0": 21.2882,"g1": 13.0728,"g2": 1.7228},
+        "w17": {"g0": 42.2869,"g1": 26.3175,"g2": 3.3724},
     })
 
-    #  ── 스케줄러 초기화 및 실행 ────────────────────────────────────
+ 
     scheduler = MCDMScheduler(
         gpus=gpus,
         perf_matrix=perf_matrix,
         sm_matrix=sm_matrix,
         mem_matrix=mem_matrix,
+        sec_matrix=latency_matrix,
     )
-    
-    assignments = scheduler.schedule_all(workloads)
+    return scheduler, workloads
 
+# ─────────────────────────────────────────────
+# 인터랙티브 실행
+# ─────────────────────────────────────────────
+ 
+def print_workload_list(workloads: list[Workload]) -> None:
+    """사용 가능한 작업 목록 출력"""
+    print("\n  사용 가능한 작업 목록:")
+    print("  " + "─" * 50)
     for w in workloads:
-        assigned_gpu, scores = assignments[w.id]
-        print_schedule_result(w, assigned_gpu, scores)
+        print(f"  {w.id:<5}  {w.name}")
+    print("  " + "─" * 50)
 
-    # ── 최종 요약 ──────────────────────────────────────────────────
+
+def main():
     print("=" * 72)
-    print("  최종 스케줄링 결과 요약")
+    print("  MCDM GPU Scheduler  :  다기준 의사결정 GPU 스케줄링 알고리즘")
+    print("  가중치: w_perf=0.15 | w_fit=0.60 | w_cost=0.15 | w_power=0.10")
     print("=" * 72)
-    for w in workloads:
-        assigned_gpu, scores = assignments[w.id]
-        print(f"  [{w.id}] {w.name:<30} → {assigned_gpu.name}  (총점: {scores[0].s_total:.1f})")
-    print("=" * 72)
+
+    scheduler, workloads = build_scheduler()
+    workload_map = {w.id: w for w in workloads}
+
+    print_workload_list(workloads)
+    print()
+    print("  입력 방법: 작업 ID 하나 입력 또는 전체 출력은 all 입력")
+    print("  예시) w0")
+    print("  종료) q 또는 quit")
+    print()
+
+    while True:
+        try:
+            raw = input("  입력 > ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  종료합니다.")
+            break
+
+        if not raw:
+            continue
+
+        # 종료
+        if raw in ("q", "quit", "exit"):
+            print("  종료합니다.")
+            break
+
+        # 목록 보기
+        if raw in ("list", "ls", "?", "help"):
+            print_workload_list(workloads)
+            continue
+
+        # 전체 실행
+        if raw == "all":
+            counter = {}
+            for w in workloads:
+                assignments = scheduler.schedule_all([w])
+                assigned_gpu, scores = assignments[w.id]
+                latency = scheduler.sec_matrix.get(w.id, assigned_gpu.id)
+                print_schedule_result(w, assigned_gpu, scores, latency)
+                counter[assigned_gpu.name] = counter.get(assigned_gpu.name, 0) + 1
+
+            total = len(workloads)
+            summary = " | ".join(f"{name}: {cnt/total*100:.0f}%" for name, cnt in counter.items())
+            print(f"  GPU 할당 비율 →  {summary}\n")
+            continue
+
+        # 공백이나 쉼표 포함 시 에러
+        if " " in raw or "," in raw:
+            print("  ⚠ 작업 ID는 하나만 입력하세요. (예: w3)")
+            continue
+
+        # 유효성 검사
+        if raw not in workload_map:
+            print(f"  ⚠ 알 수 없는 작업 ID: {raw}")
+            print("     사용 가능한 ID: w0 ~ w17")
+            continue
+
+        # 단일 작업 실행
+        workload = workload_map[raw]
+        assignments = scheduler.schedule_all([workload])
+        assigned_gpu, scores = assignments[workload.id]
+        latency = scheduler.sec_matrix.get(workload.id, assigned_gpu.id)
+        print_schedule_result(workload, assigned_gpu, scores, latency)
 
 
 if __name__ == "__main__":
