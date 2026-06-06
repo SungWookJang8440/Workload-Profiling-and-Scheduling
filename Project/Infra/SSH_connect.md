@@ -1,3 +1,25 @@
+# SSH Connection Information
+
+## Server 1 (GPU 4090 - Instance 39265510)
+- **Public IP**: 194.14.47.19
+- **Machine Copy Port**: 22099
+- **Direct SSH Port**: 22059
+- **Proxy SSH Port**: 25511 (ssh3.vast.ai)
+- **Local IPs**: 192.168.50.10, 172.17.0.1
+- **Username**: root (기본값)
+- **Password/Key**: `~/.ssh/id_ed25519` (SSH 키 사용, 비밀번호 없음)
+
+### 접속 명령어 (터미널/PowerShell 입력)
+**Direct SSH Connect (권장):**
+```bash
+ssh -p 22059 root@194.14.47.19 -L 8080:localhost:8080
+```
+
+**Proxy SSH Connect (Direct가 막혔을 때):**
+```bash
+ssh -p 25511 root@ssh3.vast.ai -L 8080:localhost:8080
+```
+
 # 🖥️ RTX PRO 6000 연구실 PC SSH 접속 가이드
 
 연구실의 RTX PRO 6000 서버에 SSH로 접속하여 작업하기 위한 공식 가이드라인입니다. 본 문서를 참고하여 터미널(CLI) 접속 및 VS Code를 통한 원격 개발 환경(Remote-SSH)을 설정할 수 있습니다.
