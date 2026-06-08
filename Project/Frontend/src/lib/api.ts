@@ -120,6 +120,38 @@ class ApiClient {
     return response.data;
   }
 
+  // Scheduler APIs
+  async getSchedulerStatus() {
+    const response = await this.client.get('/scheduler/status');
+    return response.data;
+  }
+
+  async submitSchedulerJob(prompt: string) {
+    const response = await this.client.post('/scheduler/submit', { prompt });
+    return response.data;
+  }
+
+  async tickScheduler() {
+    const response = await this.client.post('/scheduler/tick');
+    return response.data;
+  }
+
+  async resetScheduler() {
+    const response = await this.client.post('/scheduler/reset');
+    return response.data;
+  }
+
+  // Real GPU Metrics APIs (RTX 6000 Worker 연동)
+  async getGpuMetrics(gpuId: string) {
+    const response = await this.client.get(`/scheduler/metrics/${gpuId}`);
+    return response.data;
+  }
+
+  async getGpuJobStatus(gpuId: string) {
+    const response = await this.client.get(`/scheduler/gpu-status/${gpuId}`);
+    return response.data;
+  }
+
   // Health Check
   async healthCheck() {
     const response = await this.client.get('/health');
