@@ -9,6 +9,7 @@ import { DashboardPage } from '@/pages/dashboard';
 import { ClustersPage } from '@/pages/clusters';
 import { TemplatesPage } from '@/pages/templates';
 import { ProfilePage } from '@/pages/profile';
+import { SchedulerPage } from '@/pages/scheduler';
 import { ToastsContainer } from '@/components/toasts-container';
 
 function App() {
@@ -41,6 +42,7 @@ function App() {
           <Route path="containers" element={<DashboardPage />} />
           <Route path="clusters" element={<ClustersPage />} />
           <Route path="templates" element={<TemplatesPage />} />
+          <Route path="scheduler" element={<SchedulerPage />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="settings" element={<ProfilePage />} />
         </Route>

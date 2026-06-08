@@ -40,7 +40,7 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints
-                .requestMatchers("/health", "/", "/auth/register", "/auth/login", "/error", "/monitoring/**").permitAll()
+                .requestMatchers("/health", "/", "/auth/register", "/auth/login", "/error", "/monitoring/**", "/scheduler/**").permitAll()
                 // Admin endpoints
                 .requestMatchers("/admin/**").hasRole("ADMIN")
                 // All other endpoints need authentication
