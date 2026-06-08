@@ -87,7 +87,7 @@ export function SchedulerPage() {
   const [logs, setLogs] = useState<string[]>([]);
   const [isAutoTicking, setIsAutoTicking] = useState(true);
   const [lastResult, setLastResult] = useState<SubmitResult | null>(null);
-  const consoleEndRef = useRef<HTMLDivElement>(null);
+  const consoleContainerRef = useRef<HTMLDivElement>(null);
   const autoTickIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch status of the queues
@@ -160,10 +160,12 @@ export function SchedulerPage() {
     setPrompt(preset.prompt);
   };
 
-  // Scroll terminal to the bottom
+  // Scroll terminal to the bottom of the container
   useEffect(() => {
-    consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+    if (consoleContainerRef.current) {
+      consoleContainerRef.current.scrollTop = consoleContainerRef.current.scrollHeight;
+    }
+  }, [logs.length]);
 
   // Initial fetch and auto-tick loop
   useEffect(() => {
@@ -596,7 +598,7 @@ export function SchedulerPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="bg-black/80 font-mono text-[11px] leading-relaxed p-4 rounded-lg border border-border h-64 overflow-y-auto space-y-1.5 text-emerald-500/90 shadow-inner scrollbar-thin">
+          <div ref={consoleContainerRef} className="bg-black/80 font-mono text-[11px] leading-relaxed p-4 rounded-lg border border-border h-64 overflow-y-auto space-y-1.5 text-emerald-500/90 shadow-inner scrollbar-thin">
             {logs.map((log, index) => {
               // Custom text color for alerts, bypass, status pop
               let logColor = 'text-emerald-500/90';
@@ -619,7 +621,7 @@ export function SchedulerPage() {
                 출력할 로그 데이터가 없습니다.
               </div>
             )}
-            <div ref={consoleEndRef} />
+
           </div>
         </CardContent>
       </Card>
