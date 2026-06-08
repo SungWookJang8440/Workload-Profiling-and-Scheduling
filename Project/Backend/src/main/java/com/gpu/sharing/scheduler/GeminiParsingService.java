@@ -102,7 +102,7 @@ public class GeminiParsingService {
         String input = userInput.toLowerCase();
         
         // Determine category
-        boolean isResnet = input.contains("resnet") || input.contains("레즈넷");
+        boolean isResnet = input.contains("resnet") || input.contains("restnet") || input.contains("레즈넷") || input.contains("레스트넷");
         boolean isWhisper = input.contains("whisper") || input.contains("위스퍼");
         boolean isMobilenet = input.contains("mobilenet") || input.contains("모바일넷");
         boolean isVit = input.contains("vit") || input.contains("비전") || input.contains("vision");

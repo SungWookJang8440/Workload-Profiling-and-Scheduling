@@ -83,23 +83,11 @@ public class QueueManager {
         gpuStates.put("g1", new GpuQueueState("g1", "RTX 4090"));
         gpuStates.put("g2", new GpuQueueState("g2", "RTX 6000"));
 
-        // Pre-populate Node 0 (RTX 3090) with 3 tasks totaling 120s
-        GpuQueueState g0 = gpuStates.get("g0");
-        g0.getQueue().add(new QueuedJob("job-01", "w0", "resnet50-train (batch32)", 40.0));
-        g0.getQueue().add(new QueuedJob("job-02", "w3", "bert-base-cased-train (batch8)", 50.0));
-        g0.getQueue().add(new QueuedJob("job-03", "w6", "openai-whisper-large-v2-inf (batch4)", 30.0));
-        g0.recalculatePendingTime();
+        gpuStates.get("g0").recalculatePendingTime();
+        gpuStates.get("g1").recalculatePendingTime();
+        gpuStates.get("g2").recalculatePendingTime();
 
-        // Pre-populate Node 1 (RTX 4090) with 1 task totaling 30s
-        GpuQueueState g1 = gpuStates.get("g1");
-        g1.getQueue().add(new QueuedJob("job-04", "w10", "google-mobilenet_v2-inf (batch32)", 30.0));
-        g1.recalculatePendingTime();
-
-        // Node 2 (RTX 6000) starts with 0 tasks (0s)
-        GpuQueueState g2 = gpuStates.get("g2");
-        g2.recalculatePendingTime();
-
-        decisionLogs.add("[시스템 초기화] GPU 노드 대기열이 초기화되었습니다. (RTX 3090: 120초, RTX 4090: 30초, RTX 6000: 0초 대기 중)");
+        decisionLogs.add("[시스템 초기화] GPU 노드 대기열이 비어있는 상태로 초기화되었습니다.");
     }
 
     public synchronized Map<String, Object> submitJob(String workloadId, String originalInput) {

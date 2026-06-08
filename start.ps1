@@ -33,6 +33,11 @@ if ($Stop) {
             Write-Warn "Port $port has no running server."
         }
     }
+    
+    # Clean up dynamically generated temporary files
+    Remove-Item -Path "$BACKEND_DIR\run-backend-temp.ps1" -Force -ErrorAction SilentlyContinue | Out-Null
+    Remove-Item -Path "$FRONTEND_DIR\run-frontend-temp.ps1" -Force -ErrorAction SilentlyContinue | Out-Null
+    
     exit 0
 }
 
@@ -97,27 +102,30 @@ Write-OK "Ports cleared."
 
 # ----------- RUN BACKEND -----------
 Write-Step "[3/4] Starting backend server (Spring Boot, Port $BACKEND_PORT)..."
-$backendCmd = @"
+$backendScript = "$BACKEND_DIR\run-backend-temp.ps1"
+$backendContent = @"
 `$env:JAVA_HOME = '$JAVA_HOME_PATH'
 `$env:Path = '$JAVA_HOME_PATH\bin;' + `$env:Path
 Set-Location '$BACKEND_DIR'
 Write-Host '[Backend] Spring Boot starting...' -ForegroundColor Cyan
 & '$MAVEN_PATH' spring-boot:run
 "@
-Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $backendCmd -WindowStyle Normal
+Set-Content -Path $backendScript -Value $backendContent -Encoding UTF8
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-File", $backendScript -WindowStyle Normal
 Write-OK "Backend process started (Logs can be checked in the new window)"
 
 # ----------- RUN FRONTEND -----------
 Write-Step "[4/4] Starting frontend server (Vite, Port $FRONTEND_PORT)..."
-$frontendCmd = @"
+$frontendScript = "$FRONTEND_DIR\run-frontend-temp.ps1"
+$frontendContent = @"
 Set-Location '$FRONTEND_DIR'
 Write-Host '[Frontend] Checking npm install...' -ForegroundColor Cyan
 if (-not (Test-Path 'node_modules')) { npm install }
 Write-Host '[Frontend] Starting Vite dev server...' -ForegroundColor Cyan
 npm run dev
 "@
-
-Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $frontendCmd -WindowStyle Normal
+Set-Content -Path $frontendScript -Value $frontendContent -Encoding UTF8
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-File", $frontendScript -WindowStyle Normal
 Write-OK "Frontend process started (Logs can be checked in the new window)"
 
 # ----------- COMPLETE -----------
