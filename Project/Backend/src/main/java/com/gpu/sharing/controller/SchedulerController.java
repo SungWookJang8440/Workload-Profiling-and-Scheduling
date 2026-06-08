@@ -1,6 +1,8 @@
 package com.gpu.sharing.controller;
 
 import com.gpu.sharing.scheduler.GeminiParsingService;
+import com.gpu.sharing.scheduler.GpuNodeRegistry;
+import com.gpu.sharing.scheduler.GpuWorkerClient;
 import com.gpu.sharing.scheduler.QueueManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +19,12 @@ public class SchedulerController {
 
     @Autowired
     private GeminiParsingService geminiParsingService;
+
+    @Autowired
+    private GpuNodeRegistry gpuNodeRegistry;
+
+    @Autowired
+    private GpuWorkerClient gpuWorkerClient;
 
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getStatus() {
@@ -56,5 +64,58 @@ public class SchedulerController {
     public ResponseEntity<Map<String, Object>> resetSimulation() {
         queueManager.resetQueues();
         return ResponseEntity.ok(queueManager.getStatus());
+    }
+
+    /**
+     * GET /scheduler/metrics/{gpuId}
+     * RTX 6000 Worker 서버에서 실시간 nvidia-smi 메트릭을 가져와 프론트엔드에 전달합니다.
+     * gpuId: g2 (RTX 6000)
+     */
+    @GetMapping("/metrics/{gpuId}")
+    public ResponseEntity<?> getGpuMetrics(@PathVariable String gpuId) {
+        if (!gpuNodeRegistry.isRealGpu(gpuId)) {
+            return ResponseEntity.ok(Map.of(
+                "real_gpu", false,
+                "message", "이 GPU는 실제 서버에 연결되지 않았습니다. (시뮬레이션 모드)"
+            ));
+        }
+
+        String workerUrl = gpuNodeRegistry.getWorkerUrl(gpuId);
+        Map<String, Object> metrics = gpuWorkerClient.getMetrics(workerUrl);
+
+        if (metrics == null) {
+            return ResponseEntity.ok(Map.of(
+                "real_gpu", true,
+                "connected", false,
+                "message", "Worker 서버에 연결할 수 없습니다. " + workerUrl
+            ));
+        }
+
+        metrics.put("real_gpu", true);
+        metrics.put("connected", true);
+        metrics.put("worker_url", workerUrl);
+        return ResponseEntity.ok(metrics);
+    }
+
+    /**
+     * GET /scheduler/gpu-status/{gpuId}
+     * Worker 서버에서 현재 실행 중인 작업 상태를 조회합니다.
+     */
+    @GetMapping("/gpu-status/{gpuId}")
+    public ResponseEntity<?> getGpuJobStatus(@PathVariable String gpuId) {
+        if (!gpuNodeRegistry.isRealGpu(gpuId)) {
+            return ResponseEntity.ok(Map.of("real_gpu", false));
+        }
+
+        String workerUrl = gpuNodeRegistry.getWorkerUrl(gpuId);
+        Map<String, Object> status = gpuWorkerClient.getJobStatus(workerUrl);
+
+        if (status == null) {
+            return ResponseEntity.ok(Map.of("real_gpu", true, "connected", false));
+        }
+
+        status.put("real_gpu", true);
+        status.put("connected", true);
+        return ResponseEntity.ok(status);
     }
 }

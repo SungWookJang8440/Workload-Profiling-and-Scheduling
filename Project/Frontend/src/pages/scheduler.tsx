@@ -71,6 +71,27 @@ interface SubmitResult {
   time_metrics: { [key: string]: TimeMetric };
   decision_log: string;
   bypassed: boolean;
+  real_gpu_connected: boolean;
+  real_gpu_log: string | null;
+}
+
+interface RealGpuMetrics {
+  real_gpu: boolean;
+  connected: boolean;
+  sm_util: number;       // SM 사용률 (%)
+  mem_util: number;      // 메모리 사용률 (%)
+  mem_used_mb: number;   // 사용 중 메모리 (MB)
+  mem_total_mb: number;  // 전체 메모리 (MB)
+  power_w: number;       // 전력 소비 (W)
+  temp_c: number;        // 온도 (°C)
+  job: {
+    job_id: string | null;
+    workload_name: string | null;
+    status: string;
+    elapsed_sec: number;
+    remaining_sec: number;
+  };
+  worker_url: string;
 }
 
 const workloadPresets = [
@@ -87,8 +108,11 @@ export function SchedulerPage() {
   const [logs, setLogs] = useState<string[]>([]);
   const [isAutoTicking, setIsAutoTicking] = useState(true);
   const [lastResult, setLastResult] = useState<SubmitResult | null>(null);
+  const [realGpuMetrics, setRealGpuMetrics] = useState<RealGpuMetrics | null>(null);
+  const [isRealGpuActive, setIsRealGpuActive] = useState(false);
   const consoleContainerRef = useRef<HTMLDivElement>(null);
   const autoTickIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const metricsIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch status of the queues
   const fetchStatus = async (quiet = false) => {
@@ -103,6 +127,33 @@ export function SchedulerPage() {
     }
   };
 
+  // Real GPU metrics polling (RTX 6000, every 2s)
+  const startMetricsPolling = () => {
+    if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
+    metricsIntervalRef.current = setInterval(async () => {
+      try {
+        const data = await api.getGpuMetrics('g2');
+        if (data.real_gpu) {
+          setRealGpuMetrics(data as RealGpuMetrics);
+          // 작업 완료되면 폴링 정지
+          if (data.job?.status === 'IDLE' || data.job?.status === 'DONE') {
+            setIsRealGpuActive(false);
+            clearInterval(metricsIntervalRef.current!);
+          }
+        }
+      } catch {
+        // 연결 실패 시 조용히 무시
+      }
+    }, 2000);
+  };
+
+  // Cleanup metrics polling on unmount
+  useEffect(() => {
+    return () => {
+      if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
+    };
+  }, []);
+
   // Submit workload prompt
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,10 +166,20 @@ export function SchedulerPage() {
     try {
       const result = await api.submitSchedulerJob(prompt);
       setLastResult(result);
-      toast.success(
-        '작업 스케줄링 완료',
-        `${result.recommended_gpu} 노드에 작업이 정상 할당되었습니다.`
-      );
+      // 실제 GPU가 연결된 경우 메트릭 폴링 시작
+      if (result.real_gpu_connected) {
+        setIsRealGpuActive(true);
+        startMetricsPolling();
+        toast.success(
+          '✅ 실제 GPU 작업 시작!',
+          `${result.recommended_gpu}에서 실제로 연산이 실행됩니다. 아래 메트릭 패널에서 실시간 사용량을 확인하세요.`
+        );
+      } else {
+        toast.success(
+          '작업 스케줄링 완료',
+          `${result.recommended_gpu} 노드에 작업이 정상 할당되었습니다.`
+        );
+      }
       setPrompt('');
       await fetchStatus(true);
     } catch (error: any) {
@@ -186,6 +247,97 @@ export function SchedulerPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
+
+      {/* ── 실제 GPU 실시간 메트릭 패널 (RTX 6000 연결 시 표시) ── */}
+      <AnimatePresence>
+        {(isRealGpuActive || realGpuMetrics?.connected) && (
+          <motion.div
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            className="rounded-xl border border-green-500/50 bg-green-950/30 p-4"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
+              <span className="text-green-400 font-semibold text-sm">
+                🟢 RTX 6000 실제 GPU — 실시간 사용량 (nvidia-smi)
+              </span>
+              {realGpuMetrics?.job?.workload_name && (
+                <Badge variant="outline" className="text-xs border-green-500/50 text-green-300 ml-auto">
+                  실행 중: {realGpuMetrics.job.workload_name}
+                </Badge>
+              )}
+            </div>
+
+            {realGpuMetrics?.connected ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {/* SM 사용률 */}
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-green-300">
+                    {realGpuMetrics.sm_util?.toFixed(0) ?? '--'}%
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">SM 사용률</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                    <div
+                      className="h-full bg-green-400 transition-all duration-1000"
+                      style={{ width: `${realGpuMetrics.sm_util ?? 0}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* 메모리 사용량 */}
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-blue-300">
+                    {realGpuMetrics.mem_used_mb
+                      ? `${(realGpuMetrics.mem_used_mb / 1024).toFixed(1)}GB`
+                      : '--'}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    메모리 ({realGpuMetrics.mem_util?.toFixed(0)}%)
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                    <div
+                      className="h-full bg-blue-400 transition-all duration-1000"
+                      style={{ width: `${realGpuMetrics.mem_util ?? 0}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* 전력 소비 */}
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-yellow-300">
+                    {realGpuMetrics.power_w?.toFixed(0) ?? '--'}W
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">전력 소비</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                    <div
+                      className="h-full bg-yellow-400 transition-all duration-1000"
+                      style={{ width: `${Math.min(100, ((realGpuMetrics.power_w ?? 0) / 300) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* 온도 */}
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className={`text-2xl font-bold ${(realGpuMetrics.temp_c ?? 0) > 80 ? 'text-red-400' : 'text-orange-300'}`}>
+                    {realGpuMetrics.temp_c?.toFixed(0) ?? '--'}°C
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">GPU 온도</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-1000 ${(realGpuMetrics.temp_c ?? 0) > 80 ? 'bg-red-400' : 'bg-orange-400'}`}
+                      style={{ width: `${Math.min(100, ((realGpuMetrics.temp_c ?? 0) / 100) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-yellow-400">⏳ RTX 6000 Worker에 연결 중...</div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Page Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

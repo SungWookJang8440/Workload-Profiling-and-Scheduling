@@ -1,5 +1,6 @@
 package com.gpu.sharing.scheduler;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -62,6 +63,12 @@ public class QueueManager {
     private final Map<String, GpuQueueState> gpuStates = new ConcurrentHashMap<>();
     private final List<String> decisionLogs = new CopyOnWriteArrayList<>();
     private final McdmScheduler scheduler = new McdmScheduler();
+
+    @Autowired
+    private GpuNodeRegistry gpuNodeRegistry;
+
+    @Autowired
+    private GpuWorkerClient gpuWorkerClient;
     private int jobCounter = 100;
 
     public QueueManager() {
@@ -182,11 +189,37 @@ public class QueueManager {
 
         decisionLogs.add(0, decisionLog); // Prepend to show latest logs first
 
-        // 4. Push job to the selected GPU's queue
+        // 4. Push job to the selected GPU's queue (in-memory simulation)
         QueuedJob newJob = new QueuedJob(jobId, workloadId, jobName, chosenGpuTtc);
         GpuQueueState targetQueue = gpuStates.get(chosenGpuId);
         targetQueue.getQueue().add(newJob);
         targetQueue.recalculatePendingTime();
+
+        // 5. 실제 GPU Worker 연동 (RTX 6000 등 실제 서버가 연결된 경우)
+        boolean realGpuConnected = false;
+        String realGpuLog = null;
+        if (gpuNodeRegistry.isRealGpu(chosenGpuId)) {
+            String workerUrl = gpuNodeRegistry.getWorkerUrl(chosenGpuId);
+            System.out.println("[QueueManager] 실제 GPU Worker 호출 시도: " + workerUrl);
+
+            if (gpuWorkerClient.isHealthy(workerUrl)) {
+                int durationSec = Math.max(10, (int) Math.ceil(chosenGpuTtc));
+                boolean sent = gpuWorkerClient.executeJob(workerUrl, jobId, jobName, durationSec);
+                realGpuConnected = sent;
+                realGpuLog = sent
+                    ? String.format("[%s] [실제 GPU 실행] %s 작업이 RTX 6000 서버(%s)에 실제로 전달되었습니다. GPU 사용량은 대시보드 메트릭 패널에서 실시간으로 확인하세요.",
+                        LocalDateTime.now().format(timeFormatter), jobName, workerUrl)
+                    : String.format("[%s] [경고] RTX 6000 Worker 작업 전송에 실패했습니다. 시뮬레이션 모드로 대체합니다.",
+                        LocalDateTime.now().format(timeFormatter));
+            } else {
+                realGpuLog = String.format("[%s] [경고] RTX 6000 Worker 서버(%s)에 연결할 수 없습니다. 시뮬레이션 모드로 진행합니다.",
+                    LocalDateTime.now().format(timeFormatter), workerUrl);
+            }
+
+            if (realGpuLog != null) {
+                decisionLogs.add(0, realGpuLog);
+            }
+        }
 
         // Prepare return payload
         Map<String, Object> result = new HashMap<>();
@@ -199,6 +232,8 @@ public class QueueManager {
         result.put("time_metrics", timeMetrics);
         result.put("decision_log", decisionLog);
         result.put("bypassed", bypassed);
+        result.put("real_gpu_connected", realGpuConnected);
+        result.put("real_gpu_log", realGpuLog);
 
         return result;
     }

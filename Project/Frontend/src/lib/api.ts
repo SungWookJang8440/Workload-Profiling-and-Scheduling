@@ -141,6 +141,17 @@ class ApiClient {
     return response.data;
   }
 
+  // Real GPU Metrics APIs (RTX 6000 Worker 연동)
+  async getGpuMetrics(gpuId: string) {
+    const response = await this.client.get(`/scheduler/metrics/${gpuId}`);
+    return response.data;
+  }
+
+  async getGpuJobStatus(gpuId: string) {
+    const response = await this.client.get(`/scheduler/gpu-status/${gpuId}`);
+    return response.data;
+  }
+
   // Health Check
   async healthCheck() {
     const response = await this.client.get('/health');
