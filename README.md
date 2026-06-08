@@ -69,16 +69,19 @@ docker-compose up --build -d         # 코드 변경 후 재빌드
 
 ### 방법 2: 로컬 직접 실행 (Windows PowerShell)
 
-> Java 21, Maven, Node.js, PostgreSQL이 로컬에 설치되어 있어야 합니다.
+> Java 21, Node.js, PostgreSQL이 로컬에 설치되어 있어야 합니다. (Maven은 스크립트 실행 시 존재하지 않으면 자동으로 다운로드 및 설정됩니다.)
 
 ```powershell
-# 프로젝트 루트에서 원클릭 실행
+# 1. 서버 구동 (백엔드와 프론트엔드가 각각의 새 PowerShell 창에서 기동됩니다)
 .\start.ps1
+
+# 2. 서버 종료 (포트 8000, 5173을 사용하는 프로세스를 안전하게 강제 종료합니다)
+.\start.ps1 -Stop
 ```
 
 서버 기동 완료 후 접속:
-- **프론트엔드**: http://localhost:5173
-- **백엔드**: http://localhost:8000
+- **대시보드 / 스케줄러**: http://localhost:5173
+- **백엔드 API 및 헬스체크**: http://localhost:8000/health
 
 ---
 
@@ -126,6 +129,30 @@ http://localhost:5173/scheduler  # 로컬 개발 환경
 | `Whisper 라지 모델로 음성 인식해줘 배치 4` | openai-whisper-large-v2-inf (batch4) |
 | `MobileNet 추론 배치 32로 실행해줘` | google-mobilenet_v2-inf (batch32) |
 | `ViT 이미지 분류 배치 16으로 추론해줘` | google-vit-base-patch16-224-inf (batch16) |
+
+---
+
+## 🔗 실제 RTX 6000 GPU 노드 연동 (SSH 터널링)
+
+본 프로젝트는 로컬 개발 환경에서 실제 연구실 서버의 **RTX 6000 GPU 노드**에 원격으로 연산을 요청하고 실시간 하드웨어 지표(SM%, VRAM)를 수집할 수 있습니다. 
+보안 문제로 GPU 에이전트 포트(5001)가 외부에 열려있지 않으므로, **SSH 터널링(로컬 포트 포워딩)**을 사용해 통신을 연결합니다.
+
+### 1. SSH 터널링 세션 연결 (로컬 터미널)
+로컬 서버들을 켜기 전, 개별 터미널 창을 열어 아래 명령어를 통해 SSH 연결을 맺고 세션을 유지합니다.
+```bash
+ssh -p 22345 -L 5001:localhost:5001 sslab@155.230.118.52
+```
+*※ 시연 및 모니터링이 완료될 때까지 이 터미널 창은 유지되어야 합니다.*
+
+### 2. 백엔드 설정 확인
+- 백엔드 [GpuNodeRegistry.java](file:///Project/Backend/src/main/java/com/gpu/sharing/scheduler/GpuNodeRegistry.java)의 `g2` 노드 주소는 `http://localhost:5001`로 이미 설정되어 있습니다. 로컬 포트 5001로 나가는 모든 요청은 SSH 터널을 타고 원격 RTX 6000의 GPU 에이전트로 중계됩니다.
+
+### 3. 실제 GPU 로드 생성 및 모니터링 테스트 방법
+1. 로컬 환경에서 `.\start.ps1`을 실행하여 전체 시스템을 켭니다.
+2. `http://localhost:5173/scheduler`로 접속합니다.
+3. 입력창에 **"BERT 모델 파인튜닝 배치 8로 돌려줘"** 프롬프트를 입력하고 스케줄링 실행합니다.
+4. MCDM 알고리즘에 의해 RTX 6000(`g2`)이 최적 노드로 매핑되며, 실제 RTX 6000에 연산(4GB VRAM 점유 및 80% 이상의 SM 사용량)이 로드됩니다.
+5. 대시보드 화면상에서 RTX 6000 카드의 SM 사용률과 메모리 잔량 수치가 실시간(2초 폴링)으로 치솟았다가 연산 종료 후 회복되는 것을 직접 시각적으로 확인합니다.
 
 ---
 

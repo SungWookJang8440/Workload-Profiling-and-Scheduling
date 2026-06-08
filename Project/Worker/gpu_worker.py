@@ -111,17 +111,34 @@ device = torch.device('cuda')
 print(f"GPU: {{torch.cuda.get_device_name(0)}}", flush=True)
 print(f"Starting workload: {workload_name}", flush=True)
 
+# 4GB VRAM 강제 할당 (nvidia-smi 메모리 변화 가시화)
+# 1024 * 1024 * 1024 floats * 4 bytes = 4 GB
+mem_placeholder = torch.zeros(1024 * 1024 * 1024, dtype=torch.float32, device=device)
+
 x = torch.randn(size, size, device=device)
 y = torch.randn(size, size, device=device)
 
 start = time.time()
+last_print = start
 while time.time() - start < duration:
-    z = torch.matmul(x, y)
+    # 0.1초 동안 쉬지 않고 행렬 곱 수행하여 SM 사용률(util) 80% 이상 강제 유도
+    loop_start = time.time()
+    while time.time() - loop_start < 0.1:
+        z = torch.matmul(x, y)
     torch.cuda.synchronize()
-    elapsed = round(time.time() - start, 1)
-    print(f"Progress: {{elapsed}}s / {duration}s", flush=True)
-    time.sleep(1.0)
+    time.sleep(0.02) # 짧은 휴식으로 오버히트 방지 및 타 업무 양보
+    
+    now = time.time()
+    if now - last_print >= 1.0:
+        elapsed = round(now - start, 1)
+        print(f"Progress: {{elapsed}}s / {duration}s", flush=True)
+        last_print = now
 
+# 자원 해제
+del mem_placeholder
+del x
+del y
+torch.cuda.empty_cache()
 print("Workload complete.", flush=True)
 """
 
