@@ -78,6 +78,9 @@ public class SchedulerController {
         }
 
         String workloadId = geminiParsingService.parseWorkload(prompt);
+        if (workloadId == null || workloadId.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Failed to parse workload from prompt"));
+        }
         System.out.println("Mapped prompt '" + prompt + "' to workload ID: " + workloadId);
 
         Map<String, Object> analysis = queueManager.analyzeJob(workloadId);
