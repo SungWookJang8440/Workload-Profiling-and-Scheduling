@@ -18,7 +18,7 @@ public class GpuNodeRegistry {
      * - g1 (RTX 4090): 미연결 (향후 Vast.ai 추가)
      */
     private final Map<String, String> GPU_WORKER_URLS = Map.of(
-        "g2", "http://localhost:5001"   // RTX 6000 연구실 서버 (SSH 터널링 포트 포워딩)
+        "g2", "http://host.docker.internal:5001"   // RTX 6000 연구실 서버 (SSH 터널링 포트 포워딩)
         // "g0", "http://[RTX3090_IP]:5001",  // 향후 추가
         // "g1", "http://[RTX4090_IP]:5001",  // 향후 추가
     );
