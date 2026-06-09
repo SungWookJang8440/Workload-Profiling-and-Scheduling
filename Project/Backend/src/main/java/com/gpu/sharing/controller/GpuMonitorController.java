@@ -44,7 +44,7 @@ public class GpuMonitorController {
                 // fallback
             }
             String user = System.getenv().getOrDefault("RTX6000_SSH_USER", "sslab");
-            String password = System.getenv().getOrDefault("RTX6000_SSH_PASSWORD", "sslab1!2");
+            String password = System.getenv("RTX6000_SSH_PASSWORD");
             gpuMonitorService.startMonitoring(emitter, ip, port, user, password, null);
         }
 
