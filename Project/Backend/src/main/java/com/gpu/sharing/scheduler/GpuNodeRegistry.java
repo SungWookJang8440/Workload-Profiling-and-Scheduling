@@ -20,6 +20,9 @@ public class GpuNodeRegistry {
     private final Map<String, String> GPU_WORKER_URLS = Map.of(
         "g2", System.getenv().getOrDefault("RTX6000_WORKER_URL", "http://localhost:5001"),   // RTX 6000 연구실 서버 (SSH 터널링 포트 포워딩)
         "g1", System.getenv().getOrDefault("RTX4090_WORKER_URL", "http://localhost:5002")    // RTX 4090 (Vast.ai)
+        "g2", "http://host.docker.internal:5001"   // RTX 6000 연구실 서버 (SSH 터널링 포트 포워딩)
+        // "g0", "http://[RTX3090_IP]:5001",  // 향후 추가
+        // "g1", "http://[RTX4090_IP]:5001",  // 향후 추가
     );
 
     /**

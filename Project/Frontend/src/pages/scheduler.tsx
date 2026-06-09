@@ -318,6 +318,104 @@ export function SchedulerPage() {
                         실행 중: {metric.job.workload_name}
                       </Badge>
                     )}
+        {(isRealGpuActive || realGpuMetrics?.connected) && (
+          <motion.div
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            className="space-y-4"
+          >
+            {/* RTX 3090 */}
+            <div className="rounded-xl border border-gray-500/50 bg-gray-950/30 p-4 opacity-80">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-gray-500" />
+                <span className="text-gray-400 font-semibold text-sm">
+                  ⚪ RTX 3090 가상 GPU — 실시간 사용량 (미연결)
+                </span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-green-300">0%</div>
+                  <div className="text-xs text-muted-foreground mt-1">SM 사용률</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden" />
+                </div>
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-blue-300">0.0GB</div>
+                  <div className="text-xs text-muted-foreground mt-1">메모리 (0%)</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden" />
+                </div>
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-yellow-300">0W</div>
+                  <div className="text-xs text-muted-foreground mt-1">전력 소비</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden" />
+                </div>
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-orange-300">0°C</div>
+                  <div className="text-xs text-muted-foreground mt-1">GPU 온도</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden" />
+                </div>
+              </div>
+            </div>
+
+            {/* RTX 4090 */}
+            <div className="rounded-xl border border-gray-500/50 bg-gray-950/30 p-4 opacity-80">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-gray-500" />
+                <span className="text-gray-400 font-semibold text-sm">
+                  ⚪ RTX 4090 가상 GPU — 실시간 사용량 (미연결)
+                </span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-green-300">0%</div>
+                  <div className="text-xs text-muted-foreground mt-1">SM 사용률</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden" />
+                </div>
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-blue-300">0.0GB</div>
+                  <div className="text-xs text-muted-foreground mt-1">메모리 (0%)</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden" />
+                </div>
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-yellow-300">0W</div>
+                  <div className="text-xs text-muted-foreground mt-1">전력 소비</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden" />
+                </div>
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-orange-300">0°C</div>
+                  <div className="text-xs text-muted-foreground mt-1">GPU 온도</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden" />
+                </div>
+              </div>
+            </div>
+
+            {/* RTX 6000 */}
+            <div className="rounded-xl border border-green-500/50 bg-green-950/30 p-4">
+              <div className="flex items-center gap-2 mb-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
+              <span className="text-green-400 font-semibold text-sm">
+                🟢 RTX 6000 실제 GPU — 실시간 사용량 (nvidia-smi)
+              </span>
+              {realGpuMetrics?.job?.workload_name && (
+                <Badge variant="outline" className="text-xs border-green-500/50 text-green-300 ml-auto">
+                  실행 중: {realGpuMetrics.job.workload_name}
+                </Badge>
+              )}
+            </div>
+
+            {realGpuMetrics?.connected ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {/* SM 사용률 */}
+                <div className="bg-black/40 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-green-300">
+                    {realGpuMetrics.sm_util?.toFixed(0) ?? '--'}%
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">SM 사용률</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                    <div
+                      className="h-full bg-green-400 transition-all duration-1000"
+                      style={{ width: `${realGpuMetrics.sm_util ?? 0}%` }}
+                    />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -385,6 +483,13 @@ export function SchedulerPage() {
               );
             })}
           </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-yellow-400">⏳ RTX 6000 Worker에 연결 중...</div>
+            )}
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
