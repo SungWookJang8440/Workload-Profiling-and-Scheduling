@@ -46,14 +46,13 @@ public class McdmScheduler {
         this.wPower = 0.10;
     }
 
-    public double scorePerformance(String workloadId, String gpuId) {
-        Map<String, Double> throughputs = SchedulerData.PERF_MATRIX.get(workloadId);
-        if (throughputs == null || throughputs.isEmpty()) {
+    public double scorePerformance(String gpuId, Map<String, Double> dynamicThroughputs) {
+        if (dynamicThroughputs == null || dynamicThroughputs.isEmpty()) {
             return 0.0;
         }
 
-        double pIj = throughputs.getOrDefault(gpuId, 0.0);
-        double pMax = throughputs.values().stream().max(Double::compare).orElse(1.0);
+        double pIj = dynamicThroughputs.getOrDefault(gpuId, 0.0);
+        double pMax = dynamicThroughputs.values().stream().max(Double::compare).orElse(1.0);
 
         if (Math.abs(pMax) < 1e-9) {
             return 0.0;
@@ -92,7 +91,7 @@ public class McdmScheduler {
         return (sSm + sMem) / 2.0;
     }
 
-    public double scoreCostEfficiency(String workloadId, String gpuId) {
+    public double scoreCostEfficiency(String gpuId, Map<String, Double> dynamicThroughputs) {
         SchedulerData.GPU targetGpu = null;
         for (SchedulerData.GPU g : gpus) {
             if (g.getId().equals(gpuId)) {
@@ -102,10 +101,10 @@ public class McdmScheduler {
         }
         if (targetGpu == null) return 0.0;
 
-        double tpdJ = calculateTpd(workloadId, targetGpu);
+        double tpdJ = calculateTpd(targetGpu, dynamicThroughputs);
         double maxTpd = 0.0;
         for (SchedulerData.GPU g : gpus) {
-            double val = calculateTpd(workloadId, g);
+            double val = calculateTpd(g, dynamicThroughputs);
             if (val > maxTpd) maxTpd = val;
         }
 
@@ -113,12 +112,12 @@ public class McdmScheduler {
         return Math.sqrt(tpdJ / maxTpd) * 100.0;
     }
 
-    private double calculateTpd(String workloadId, SchedulerData.GPU g) {
-        double throughput = SchedulerData.PERF_MATRIX.getOrDefault(workloadId, Map.of()).getOrDefault(g.getId(), 0.0);
+    private double calculateTpd(SchedulerData.GPU g, Map<String, Double> dynamicThroughputs) {
+        double throughput = dynamicThroughputs.getOrDefault(g.getId(), 0.0);
         return g.getCostPerHour() > 0 ? throughput / Math.pow(g.getCostPerHour(), 2) : 0.0;
     }
 
-    public double scorePowerEfficiency(String workloadId, String gpuId) {
+    public double scorePowerEfficiency(String gpuId, Map<String, Double> dynamicThroughputs) {
         SchedulerData.GPU targetGpu = null;
         for (SchedulerData.GPU g : gpus) {
             if (g.getId().equals(gpuId)) {
@@ -128,10 +127,10 @@ public class McdmScheduler {
         }
         if (targetGpu == null) return 0.0;
 
-        double tpwJ = calculateTpw(workloadId, targetGpu);
+        double tpwJ = calculateTpw(targetGpu, dynamicThroughputs);
         double maxTpw = 0.0;
         for (SchedulerData.GPU g : gpus) {
-            double val = calculateTpw(workloadId, g);
+            double val = calculateTpw(g, dynamicThroughputs);
             if (val > maxTpw) maxTpw = val;
         }
 
@@ -139,18 +138,18 @@ public class McdmScheduler {
         return Math.sqrt(tpwJ / maxTpw) * 100.0;
     }
 
-    private double calculateTpw(String workloadId, SchedulerData.GPU g) {
-        double throughput = SchedulerData.PERF_MATRIX.getOrDefault(workloadId, Map.of()).getOrDefault(g.getId(), 0.0);
+    private double calculateTpw(SchedulerData.GPU g, Map<String, Double> dynamicThroughputs) {
+        double throughput = dynamicThroughputs.getOrDefault(g.getId(), 0.0);
         return g.getWatts() > 0 ? throughput / Math.pow(g.getWatts(), 2) : 0.0;
     }
 
-    public List<ScoreDetail> computeScores(String workloadId) {
+    public List<ScoreDetail> computeScores(String workloadId, Map<String, Double> dynamicThroughputs) {
         List<ScoreDetail> details = new ArrayList<>();
         for (SchedulerData.GPU gpu : gpus) {
-            double sPerf = scorePerformance(workloadId, gpu.getId());
+            double sPerf = scorePerformance(gpu.getId(), dynamicThroughputs);
             double sFit = scoreResourceFit(workloadId, gpu.getId());
-            double sCost = scoreCostEfficiency(workloadId, gpu.getId());
-            double sPower = scorePowerEfficiency(workloadId, gpu.getId());
+            double sCost = scoreCostEfficiency(gpu.getId(), dynamicThroughputs);
+            double sPower = scorePowerEfficiency(gpu.getId(), dynamicThroughputs);
 
             double sTotal = wPerf * sPerf + wFit * sFit + wCost * sCost + wPower * sPower;
 

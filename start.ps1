@@ -9,8 +9,8 @@ param(
 
 $ErrorActionPreference = "SilentlyContinue"
 
-$JAVA_HOME_PATH  = "C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot"
-$MAVEN_PATH      = "C:\Users\csu84\Desktop\Workspace\maven\apache-maven-3.9.6\bin\mvn.cmd"
+$JAVA_HOME_PATH  = "C:\Program Files\JetBrains\PyCharm 2025.2.3\jbr"
+$MAVEN_PATH      = "$PSScriptRoot\Project\maven\apache-maven-3.9.6\bin\mvn.cmd"
 $BACKEND_DIR     = "$PSScriptRoot\Project\Backend"
 $FRONTEND_DIR    = "$PSScriptRoot\Project\Frontend"
 $BACKEND_PORT    = 8000
@@ -58,10 +58,10 @@ if (Test-Path "$JAVA_HOME_PATH\bin\java.exe") {
 }
 
 # Verify Maven & Auto-Download
-$mavenDir = "C:\Users\csu84\Desktop\Workspace\maven"
+$mavenDir = "$PSScriptRoot\Project\maven"
 if (-not (Test-Path $MAVEN_PATH)) {
     Write-Warn "Maven not found. Downloading light Maven..."
-    $zipPath = "C:\Users\csu84\Desktop\Workspace\maven.zip"
+    $zipPath = "$PSScriptRoot\Project\maven.zip"
     try {
         if (-not (Test-Path $mavenDir)) {
             New-Item -ItemType Directory -Path $mavenDir -Force | Out-Null
