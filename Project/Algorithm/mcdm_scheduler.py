@@ -593,19 +593,36 @@ def main():
             print(f"  GPU 할당 비율 →  {summary}\n")
             continue
 
-        # 공백이나 쉼표 포함 시 에러
-        if " " in raw or "," in raw:
-            print("  ⚠ 작업 ID는 하나만 입력하세요. (예: w3)")
+        # "w0 비용" 형태 파싱
+        parts = raw.split()
+        raw_id = parts[0]
+        suffix = parts[1] if len(parts) == 2 else ""
+
+        # 허용된 접미사 외 공백 입력 차단
+        if len(parts) > 2 or (len(parts) == 2 and suffix != "비용"):
+            print("  ⚠ 올바른 형식으로 입력하세요. (예: w3 또는 w3 비용)")
             continue
 
         # 유효성 검사
-        if raw not in workload_map:
-            print(f"  ⚠ 알 수 없는 작업 ID: {raw}")
+        if raw_id not in workload_map:
+            print(f"  ⚠ 알 수 없는 작업 ID: {raw_id}")
             print("     사용 가능한 ID: w0 ~ w17")
             continue
 
         # 단일 작업 실행
-        workload = workload_map[raw]
+        workload = workload_map[raw_id]
+        
+        if suffix == "비용":
+            scheduler.w_perf  = 0.10
+            scheduler.w_fit   = 0.50
+            scheduler.w_cost  = 0.30
+            scheduler.w_power = 0.10
+        else:
+            scheduler.w_perf  = 0.15
+            scheduler.w_fit   = 0.60
+            scheduler.w_cost  = 0.15
+            scheduler.w_power = 0.10
+        
         assignments = scheduler.schedule_all([workload])
         assigned_gpu, scores = assignments[workload.id]
         latency = scheduler.sec_matrix.get(workload.id, assigned_gpu.id)
