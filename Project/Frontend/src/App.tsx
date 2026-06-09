@@ -39,12 +39,12 @@ function App() {
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="containers" element={<DashboardPage />} />
+          <Route path="containers" element={<Navigate to="/dashboard" replace />} />
           <Route path="clusters" element={<ClustersPage />} />
           <Route path="templates" element={<TemplatesPage />} />
           <Route path="scheduler" element={<SchedulerPage />} />
           <Route path="profile" element={<ProfilePage />} />
-          <Route path="settings" element={<ProfilePage />} />
+          <Route path="settings" element={<Navigate to="/profile" replace />} />
         </Route>
 
         {/* Fallback */}

@@ -22,19 +22,29 @@ public class GpuMonitorController {
     public SseEmitter streamGpuMetrics(@RequestParam(defaultValue = "6000") String serverId) {
         SseEmitter emitter = new SseEmitter(600000L); // 10분 타임아웃
         
-        if ("4090".equals(serverId)) {
-            // 새로 추가된 vast.ai 4090 서버
-            String ip = "194.14.47.19";
+        if ("4090".equals(serverId) || "g1".equals(serverId)) {
+            // 새로 추가된 vast.ai 4090 서버 (환경 변수 지원)
+            String ip = System.getenv().getOrDefault("RTX4090_SSH_HOST", "194.14.47.19");
             int port = 22059;
-            String user = "root";
+            try {
+                port = Integer.parseInt(System.getenv().getOrDefault("RTX4090_SSH_PORT", "22059"));
+            } catch (NumberFormatException e) {
+                // fallback
+            }
+            String user = System.getenv().getOrDefault("RTX4090_SSH_USER", "root");
             String keyPath = System.getProperty("user.home") + "/.ssh/id_ed25519";
             gpuMonitorService.startMonitoring(emitter, ip, port, user, null, keyPath);
         } else {
-            // 현재 하드코딩된 기존 RTX 6000 정보
-            String ip = "155.230.118.52";
+            // 현재 하드코딩된 기존 RTX 6000 정보 (환경 변수 지원)
+            String ip = System.getenv().getOrDefault("RTX6000_SSH_HOST", "155.230.118.52");
             int port = 22345;
-            String user = "sslab";
-            String password = "sslab1!2";
+            try {
+                port = Integer.parseInt(System.getenv().getOrDefault("RTX6000_SSH_PORT", "22345"));
+            } catch (NumberFormatException e) {
+                // fallback
+            }
+            String user = System.getenv().getOrDefault("RTX6000_SSH_USER", "sslab");
+            String password = System.getenv().getOrDefault("RTX6000_SSH_PASSWORD", "sslab1!2");
             gpuMonitorService.startMonitoring(emitter, ip, port, user, password, null);
         }
 

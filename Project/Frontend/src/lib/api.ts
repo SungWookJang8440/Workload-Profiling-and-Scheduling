@@ -131,6 +131,16 @@ class ApiClient {
     return response.data;
   }
 
+  async analyzeSchedulerJob(prompt: string) {
+    const response = await this.client.post('/scheduler/analyze', { prompt });
+    return response.data;
+  }
+
+  async executeSchedulerJob(workloadId: string, gpuId: string) {
+    const response = await this.client.post('/scheduler/execute', { workloadId, gpuId });
+    return response.data;
+  }
+
   async tickScheduler() {
     const response = await this.client.post('/scheduler/tick');
     return response.data;

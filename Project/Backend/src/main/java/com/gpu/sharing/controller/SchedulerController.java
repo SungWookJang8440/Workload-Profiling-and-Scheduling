@@ -38,6 +38,38 @@ public class SchedulerController {
         public void setPrompt(String prompt) { this.prompt = prompt; }
     }
 
+    public static class ExecuteRequest {
+        private String workloadId;
+        private String gpuId;
+
+        public String getWorkloadId() { return workloadId; }
+        public void setWorkloadId(String workloadId) { this.workloadId = workloadId; }
+        public String getGpuId() { return gpuId; }
+        public void setGpuId(String gpuId) { this.gpuId = gpuId; }
+    }
+
+    @PostMapping("/analyze")
+    public ResponseEntity<Map<String, Object>> analyzeJob(@RequestBody SubmitRequest request) {
+        String prompt = request.getPrompt();
+        if (prompt == null || prompt.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Workload prompt cannot be empty"));
+        }
+        String workloadId = geminiParsingService.parseWorkload(prompt);
+        Map<String, Object> result = queueManager.analyzeJob(workloadId);
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/execute")
+    public ResponseEntity<Map<String, Object>> executeJob(@RequestBody ExecuteRequest request) {
+        String workloadId = request.getWorkloadId();
+        String gpuId = request.getGpuId();
+        if (workloadId == null || gpuId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "workloadId and gpuId are required"));
+        }
+        Map<String, Object> result = queueManager.executeJob(workloadId, gpuId);
+        return ResponseEntity.ok(result);
+    }
+
     @PostMapping("/submit")
     public ResponseEntity<Map<String, Object>> submitJob(@RequestBody SubmitRequest request) {
         String prompt = request.getPrompt();
@@ -45,12 +77,15 @@ public class SchedulerController {
             return ResponseEntity.badRequest().body(Map.of("error", "Workload prompt cannot be empty"));
         }
 
-        // Step 1: Map the natural language prompt to a workload ID (using Gemini / local fallback)
         String workloadId = geminiParsingService.parseWorkload(prompt);
         System.out.println("Mapped prompt '" + prompt + "' to workload ID: " + workloadId);
 
-        // Step 2: Queue the job and compute MCDM scores and load-balancing decisions
-        Map<String, Object> result = queueManager.submitJob(workloadId, prompt);
+        Map<String, Object> analysis = queueManager.analyzeJob(workloadId);
+        String recommendedGpuId = (String) analysis.get("recommended_gpu_id");
+        Map<String, Object> execution = queueManager.executeJob(workloadId, recommendedGpuId);
+
+        Map<String, Object> result = new java.util.HashMap<>(analysis);
+        result.putAll(execution);
         return ResponseEntity.ok(result);
     }
 

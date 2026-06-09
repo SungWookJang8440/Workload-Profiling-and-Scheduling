@@ -23,7 +23,6 @@ import { cn } from '@/lib/utils';
 
 const sidebarItems = [
   { icon: LayoutDashboard, label: '대시보드', href: '/dashboard' },
-  { icon: Box, label: '내 컨테이너', href: '/containers' },
   { icon: Server, label: '클러스터', href: '/clusters' },
   { icon: Layers, label: '템플릿', href: '/templates' },
   { icon: Cpu, label: 'MCDM 스케줄러', href: '/scheduler' },
@@ -112,13 +111,6 @@ function UserMenu() {
             >
               <User className="w-4 h-4" />
               프로필
-            </Link>
-            <Link
-              to="/settings"
-              className="flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent"
-            >
-              <Settings className="w-4 h-4" />
-              설정
             </Link>
             <Separator className="my-1" />
             <button
