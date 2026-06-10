@@ -136,6 +136,13 @@ class ApiClient {
     return response.data;
   }
 
+  async submitExecutedJob(workloadId: string, prompt: string, chosenGpuId: string, chosenGpuTtc: number) {
+    const response = await this.client.post('/scheduler/submit', {
+      workloadId,
+      prompt,
+      chosenGpuId,
+      chosenGpuTtc
+    });
   async executeSchedulerJob(workloadId: string, gpuId: string) {
     const response = await this.client.post('/scheduler/execute', { workloadId, gpuId });
     return response.data;
