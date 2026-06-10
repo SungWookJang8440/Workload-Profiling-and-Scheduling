@@ -11,6 +11,7 @@ public class McdmSchedulerTest {
         McdmScheduler scheduler = new McdmScheduler();
         
         // Compute scores for workload w0 (resnet50-train batch 32)
+        List<McdmScheduler.ScoreDetail> scores = scheduler.computeScores("w0", SchedulerData.PERF_MATRIX.get("w0"));
         List<McdmScheduler.ScoreDetail> scores = scheduler.computeScores("w0", java.util.Map.of());
         
         assertNotNull(scores);

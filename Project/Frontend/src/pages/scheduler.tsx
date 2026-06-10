@@ -73,6 +73,7 @@ interface SubmitResult {
   bypassed: boolean;
   real_gpu_connected: boolean;
   real_gpu_log: string | null;
+  use_cost_priority?: boolean;
 }
 
 interface RealGpuMetrics {
@@ -108,8 +109,12 @@ export function SchedulerPage() {
   const [logs, setLogs] = useState<string[]>([]);
   const [isAutoTicking, setIsAutoTicking] = useState(true);
   const [lastResult, setLastResult] = useState<SubmitResult | null>(null);
-  const [realGpuMetrics, setRealGpuMetrics] = useState<RealGpuMetrics | null>(null);
+  const [realGpuMetrics, setRealGpuMetrics] = useState<{[key: string]: RealGpuMetrics | null}>({});
   const [isRealGpuActive, setIsRealGpuActive] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [analysisData, setAnalysisData] = useState<any>(null);
   const consoleContainerRef = useRef<HTMLDivElement>(null);
   const autoTickIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const metricsIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -127,22 +132,23 @@ export function SchedulerPage() {
     }
   };
 
-  // Real GPU metrics polling (RTX 6000, every 2s)
+  // Real GPU metrics polling (RTX 6000 and RTX 4090, every 2s)
   const startMetricsPolling = () => {
     if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
     metricsIntervalRef.current = setInterval(async () => {
-      try {
-        const data = await api.getGpuMetrics('g2');
-        if (data.real_gpu) {
-          setRealGpuMetrics(data as RealGpuMetrics);
-          // 작업 완료되면 폴링 정지
-          if (data.job?.status === 'IDLE' || data.job?.status === 'DONE') {
-            setIsRealGpuActive(false);
-            clearInterval(metricsIntervalRef.current!);
+      const gpuIds = ['g1', 'g2'];
+      for (const gpuId of gpuIds) {
+        try {
+          const data = await api.getGpuMetrics(gpuId);
+          if (data.real_gpu) {
+            setRealGpuMetrics(prev => ({
+              ...prev,
+              [gpuId]: data as RealGpuMetrics
+            }));
           }
+        } catch {
+          // 연결 실패 시 조용히 무시
         }
-      } catch {
-        // 연결 실패 시 조용히 무시
       }
     }, 2000);
   };
@@ -154,7 +160,14 @@ export function SchedulerPage() {
     };
   }, []);
 
-  // Submit workload prompt
+  const [analysisResult, setAnalysisResult] = useState<any | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [activePrompt, setActivePrompt] = useState('');
+  const detailsRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+
+  // Submit workload prompt (Phase 1: Analyze)
+  // Submit workload prompt for analysis
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim()) {
@@ -163,33 +176,181 @@ export function SchedulerPage() {
     }
 
     setLoading(true);
+    setIsAnalyzing(true);
+    setAnalysisProgress(0);
+
+    // Simulate progress bar over 2 seconds
+    const intervalTime = 50; // ms
+    const totalSteps = 2000 / intervalTime; // 40 steps
+    let step = 0;
+
+    const progressTimer = setInterval(() => {
+      step++;
+      const currentProgress = Math.min(100, Math.round((step / totalSteps) * 100));
+      setAnalysisProgress(currentProgress);
+      if (step >= totalSteps) {
+        clearInterval(progressTimer);
+      }
+    }, intervalTime);
+
     try {
-      const result = await api.submitSchedulerJob(prompt);
-      setLastResult(result);
-      // 실제 GPU가 연결된 경우 메트릭 폴링 시작
-      if (result.real_gpu_connected) {
+      // Fetch the analysis result
+      const result = await api.analyzeSchedulerJob(prompt);
+
+      // Wait for the simulated progress bar to reach 100% (total 2 seconds)
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      setAnalysisResult(result);
+      setLastResult(result); // Show scores
+      setActivePrompt(prompt);
+      setShowConfirm(true);
+      setPrompt('');
+
+      toast.success(
+        '🔍 분석 및 평가 완료',
+        `${result.recommended_gpu} 노드가 최적으로 선정되었습니다. 실행 승인 여부를 선택해 주세요.`
+      );
+    } catch (error: any) {
+      toast.error(
+        '분석 실패',
+        error.response?.data?.error || '분석 과정 중 에러가 발생했습니다.'
+      );
+      setLastResult(null);
+      setAnalysisResult(null);
+      setShowConfirm(false);
+    } finally {
+      setLoading(false);
+      setIsAnalyzing(false);
+      setAnalysisProgress(0);
+      clearInterval(progressTimer);
+    }
+  };
+
+  // Phase 2: Execute (Confirm YES)
+  const handleConfirmYes = async () => {
+    if (!analysisResult) return;
+    setLoading(true);
+    try {
+      const execution = await api.submitExecutedJob(
+        analysisResult.workload_id,
+        activePrompt,
+        analysisResult.recommended_gpu_id,
+        analysisResult.recommended_gpu_ttc
+      );
+
+      // Merge scores from analysis for rendering
+      const mergedResult = {
+        ...execution,
+        mcdm_scores: analysisResult.mcdm_scores,
+        time_metrics: analysisResult.time_metrics,
+        use_cost_priority: analysisResult.use_cost_priority,
+        bypassed: false
+      };
+      
+      setLastResult(mergedResult);
+
+      if (execution.real_gpu_connected) {
         setIsRealGpuActive(true);
         startMetricsPolling();
         toast.success(
-          '✅ 실제 GPU 작업 시작!',
-          `${result.recommended_gpu}에서 실제로 연산이 실행됩니다. 아래 메트릭 패널에서 실시간 사용량을 확인하세요.`
+          '✅ 실제 GPU 작업 실행 시작!',
+          `${execution.recommended_gpu}에서 연산이 실제로 가동됩니다.`
         );
       } else {
         toast.success(
-          '작업 스케줄링 완료',
-          `${result.recommended_gpu} 노드에 작업이 정상 할당되었습니다.`
+          '🚀 작업 스케줄링 완료',
+          `${execution.recommended_gpu} 노드 대기열에 작업이 배치되었습니다.`
         );
       }
-      setPrompt('');
+      
       await fetchStatus(true);
     } catch (error: any) {
+      toast.error('실행 요청 실패', '대기열 배치 중 에러가 발생했습니다.');
+    } finally {
+      setLoading(false);
+      setShowConfirm(false);
+      setAnalysisResult(null);
+    }
+  };
+
+  // Confirm NO
+  const handleConfirmNo = () => {
+    setLastResult(null);
+    setAnalysisResult(null);
+    setShowConfirm(false);
+    setActivePrompt('');
+    toast.success('취소됨', '작업 요청이 취소되어 초기화되었습니다.');
+      const result = await api.analyzeSchedulerJob(prompt);
+      setAnalysisData(result);
+      setShowConfirmModal(true);
+      setPrompt('');
+    } catch (error: any) {
       toast.error(
-        '스케줄링 실패',
+        '분석 실패',
         error.response?.data?.error || '알고리즘 연산 중 에러가 발생했습니다.'
       );
     } finally {
       setLoading(false);
     }
+  };
+
+  // Confirm and execute the analyzed job
+  const handleConfirmExecute = async () => {
+    if (!analysisData) return;
+
+    setLoading(true);
+    setShowConfirmModal(false);
+    try {
+      const execResult = await api.executeSchedulerJob(analysisData.workload_id, analysisData.recommended_gpu_id);
+      
+      // Merge analysis data and execution result to present the complete details
+      const fullResult = {
+        ...analysisData,
+        ...execResult
+      } as SubmitResult;
+      
+      setLastResult(fullResult);
+
+      if (execResult.real_gpu_connected) {
+        setIsRealGpuActive(true);
+        startMetricsPolling();
+        toast.success(
+          '✅ 실제 GPU 작업 시작!',
+          `${execResult.recommended_gpu}에서 실제로 연산이 실행됩니다. 아래 메트릭 패널에서 실시간 사용량을 확인하세요.`
+        );
+      } else {
+        toast.success(
+          '작업 스케줄링 완료',
+          `${execResult.recommended_gpu} 노드에 작업이 정상 할당되었습니다.`
+        );
+      }
+      await fetchStatus(true);
+    } catch (error: any) {
+      toast.error(
+        '실행 실패',
+        error.response?.data?.error || '실제 GPU 작업 실행 중 에러가 발생했습니다.'
+      );
+    } finally {
+      setLoading(false);
+      setAnalysisData(null);
+    }
+  };
+
+  // Cancel job execution but keep the analysis on the dashboard
+  const handleCancelExecute = () => {
+    setShowConfirmModal(false);
+    if (analysisData) {
+      setLastResult({
+        ...analysisData,
+        job_id: '',
+        decision_log: `[분석 전용] '${analysisData.workload_name}' 작업에 대한 최적 매핑 노드는 ${analysisData.recommended_gpu}로 분석되었으나, 사용자가 실행을 취소하였습니다.`,
+        bypassed: false,
+        real_gpu_connected: false,
+        real_gpu_log: null
+      });
+    }
+    setAnalysisData(null);
+    toast.add({ title: '실행 취소', description: '실제 GPU 접근 및 작업 할당이 취소되었습니다.', variant: 'default' });
   };
 
   // Trigger manual tick
@@ -210,6 +371,8 @@ export function SchedulerPage() {
       setGpuStates(data.gpu_states);
       setLogs(data.logs);
       setLastResult(null);
+      setAnalysisResult(null);
+      setShowConfirm(false);
       toast.success('초기화 완료', '모든 노드 대기열 및 로그가 초기화되었습니다.');
     } catch (error) {
       toast.error('초기화 실패', '시뮬레이션을 초기화하지 못했습니다.');
@@ -231,6 +394,7 @@ export function SchedulerPage() {
   // Initial fetch and auto-tick loop
   useEffect(() => {
     fetchStatus();
+    startMetricsPolling();
 
     if (isAutoTicking) {
       autoTickIntervalRef.current = setInterval(() => {
@@ -242,14 +406,40 @@ export function SchedulerPage() {
       if (autoTickIntervalRef.current) {
         clearInterval(autoTickIntervalRef.current);
       }
+      if (metricsIntervalRef.current) {
+        clearInterval(metricsIntervalRef.current);
+      }
     };
   }, [isAutoTicking]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
 
-      {/* ── 실제 GPU 실시간 메트릭 패널 (RTX 6000 연결 시 표시) ── */}
+      {/* ── 실제 GPU 실시간 메트릭 패널 Grid ── */}
       <AnimatePresence>
+        {Object.values(realGpuMetrics).some(m => m && m.connected) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            {Object.entries(realGpuMetrics).map(([gpuId, metric]) => {
+              if (!metric || !metric.connected) return null;
+              const gpuName = gpuId === 'g1' ? 'RTX 4090' : 'RTX 6000';
+              return (
+                <motion.div
+                  key={gpuId}
+                  initial={{ opacity: 0, y: -16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -16 }}
+                  className="rounded-xl border border-green-500/50 bg-green-950/30 p-4"
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
+                    <span className="text-green-400 font-semibold text-sm">
+                      🟢 {gpuName} 실제 GPU — 실시간 사용량 (nvidia-smi)
+                    </span>
+                    {metric.job?.workload_name && (
+                      <Badge variant="outline" className="text-xs border-green-500/50 text-green-300 ml-auto">
+                        실행 중: {metric.job.workload_name}
+                      </Badge>
+                    )}
         {(isRealGpuActive || realGpuMetrics?.connected) && (
           <motion.div
             initial={{ opacity: 0, y: -16 }}
@@ -349,52 +539,72 @@ export function SchedulerPage() {
                       style={{ width: `${realGpuMetrics.sm_util ?? 0}%` }}
                     />
                   </div>
-                </div>
 
-                {/* 메모리 사용량 */}
-                <div className="bg-black/40 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-bold text-blue-300">
-                    {realGpuMetrics.mem_used_mb
-                      ? `${(realGpuMetrics.mem_used_mb / 1024).toFixed(1)}GB`
-                      : '--'}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    메모리 ({realGpuMetrics.mem_util?.toFixed(0)}%)
-                  </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                    <div
-                      className="h-full bg-blue-400 transition-all duration-1000"
-                      style={{ width: `${realGpuMetrics.mem_util ?? 0}%` }}
-                    />
-                  </div>
-                </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* SM 사용률 */}
+                    <div className="bg-black/40 rounded-lg p-2.5 text-center">
+                      <div className="text-xl font-bold text-green-300">
+                        {metric.sm_util?.toFixed(0) ?? '--'}%
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">SM 사용률</div>
+                      <div className="mt-1.5 h-1 rounded-full bg-gray-800 overflow-hidden">
+                        <div
+                          className="h-full bg-green-400 transition-all duration-1000"
+                          style={{ width: `${metric.sm_util ?? 0}%` }}
+                        />
+                      </div>
+                    </div>
 
-                {/* 전력 소비 */}
-                <div className="bg-black/40 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-bold text-yellow-300">
-                    {realGpuMetrics.power_w?.toFixed(0) ?? '--'}W
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">전력 소비</div>
-                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                    <div
-                      className="h-full bg-yellow-400 transition-all duration-1000"
-                      style={{ width: `${Math.min(100, ((realGpuMetrics.power_w ?? 0) / 300) * 100)}%` }}
-                    />
-                  </div>
-                </div>
+                    {/* 메모리 사용량 */}
+                    <div className="bg-black/40 rounded-lg p-2.5 text-center">
+                      <div className="text-xl font-bold text-blue-300">
+                        {metric.mem_used_mb
+                          ? `${(metric.mem_used_mb / 1024).toFixed(1)}GB`
+                          : '--'}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        메모리 ({metric.mem_util?.toFixed(0)}%)
+                      </div>
+                      <div className="mt-1.5 h-1 rounded-full bg-gray-800 overflow-hidden">
+                        <div
+                          className="h-full bg-blue-400 transition-all duration-1000"
+                          style={{ width: `${metric.mem_util ?? 0}%` }}
+                        />
+                      </div>
+                    </div>
 
-                {/* 온도 */}
-                <div className="bg-black/40 rounded-lg p-3 text-center">
-                  <div className={`text-2xl font-bold ${(realGpuMetrics.temp_c ?? 0) > 80 ? 'text-red-400' : 'text-orange-300'}`}>
-                    {realGpuMetrics.temp_c?.toFixed(0) ?? '--'}°C
+                    {/* 전력 소비 */}
+                    <div className="bg-black/40 rounded-lg p-2.5 text-center">
+                      <div className="text-xl font-bold text-yellow-300">
+                        {metric.power_w?.toFixed(0) ?? '--'}W
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">전력 소비</div>
+                      <div className="mt-1.5 h-1 rounded-full bg-gray-800 overflow-hidden">
+                        <div
+                          className="h-full bg-yellow-400 transition-all duration-1000"
+                          style={{ width: `${Math.min(100, ((metric.power_w ?? 0) / (gpuId === 'g1' ? 450 : 300)) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* 온도 */}
+                    <div className="bg-black/40 rounded-lg p-2.5 text-center">
+                      <div className={`text-xl font-bold ${(metric.temp_c ?? 0) > 80 ? 'text-red-400' : 'text-orange-300'}`}>
+                        {metric.temp_c?.toFixed(0) ?? '--'}°C
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">GPU 온도</div>
+                      <div className="mt-1.5 h-1 rounded-full bg-gray-800 overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-1000 ${(metric.temp_c ?? 0) > 80 ? 'bg-red-400' : 'bg-orange-400'}`}
+                          style={{ width: `${Math.min(100, ((metric.temp_c ?? 0) / 100) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1">GPU 온도</div>
-                  <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-1000 ${(realGpuMetrics.temp_c ?? 0) > 80 ? 'bg-red-400' : 'bg-orange-400'}`}
-                      style={{ width: `${Math.min(100, ((realGpuMetrics.temp_c ?? 0) / 100) * 100)}%` }}
-                    />
-                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
                 </div>
               </div>
             ) : (
@@ -443,7 +653,111 @@ export function SchedulerPage() {
       </div>
 
       {/* Grid: Submit + Last Result Metrics */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="relative grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* In-place Block Overlay for Confirmation (no screen scrolling) */}
+        <AnimatePresence>
+          {showConfirm && (
+            <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-md rounded-2xl p-4 border border-purple-500/30">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-gray-950 border-2 border-purple-500 rounded-2xl p-6 max-w-2xl w-full space-y-5 shadow-2xl shadow-purple-500/20"
+              >
+                <div className="flex items-center gap-3 border-b border-border pb-3">
+                  <HelpCircle className="w-6 h-6 text-purple-400 animate-bounce" />
+                  <h3 className="text-lg font-bold text-white">MCDM 스케줄링 분석 결과 & 승인 요청</h3>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="p-3 bg-purple-950/20 border border-purple-500/30 rounded-xl space-y-1 text-xs">
+                    <p className="text-gray-300">입력하신 자연어 프롬프트가 분석되었습니다:</p>
+                    <p className="text-yellow-300 font-semibold italic text-sm mt-1">"{activePrompt}"</p>
+                    <div className="grid grid-cols-2 gap-4 mt-2.5 pt-2.5 border-t border-purple-500/20 text-[11px]">
+                      <div>
+                        <span className="text-muted-foreground">매핑된 작업: </span>
+                        <span className="text-white font-medium">{analysisResult?.workload_name}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">비용 가중치 모드: </span>
+                        <span className={analysisResult?.use_cost_priority ? "text-emerald-400 font-bold" : "text-gray-400"}>
+                          {analysisResult?.use_cost_priority ? "적용됨 (30%)" : "미적용 (15%)"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* GPU MCDM & Time Metrics Comparison Inside In-place Card */}
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">GPU별 분석 및 예측 스코어</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {analysisResult?.mcdm_scores?.map((score: any) => {
+                        const gpuId = score.gpu.id;
+                        const isRecommended = analysisResult.recommended_gpu_id === gpuId;
+                        const metric = analysisResult.time_metrics?.[gpuId];
+                        const gpuName = score.gpu.name;
+
+                        return (
+                          <div
+                            key={gpuId}
+                            className={`p-3 rounded-xl border transition-all ${
+                              isRecommended
+                                ? 'bg-purple-950/40 border-purple-500 shadow-md shadow-purple-500/10'
+                                : 'bg-secondary/10 border-border opacity-70'
+                            }`}
+                          >
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="font-bold text-xs text-white">
+                                {gpuName}
+                                {isRecommended && <span className="text-[10px] block text-purple-400 font-medium">(추천 노드)</span>}
+                              </span>
+                              <Badge className={isRecommended ? "bg-purple-500 text-white font-bold text-[10px]" : "bg-gray-800 text-gray-400 text-[10px]"}>
+                                {Math.round(score.stotal)}점
+                              </Badge>
+                            </div>
+                            
+                            <div className="space-y-1 text-[11px] border-t border-border/40 pt-1.5 mt-1">
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">자원적합:</span>
+                                <span className="text-white font-medium">{Math.round(score.sfit)}점</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">비용효율:</span>
+                                <span className="text-white font-medium">{Math.round(score.scost)}점</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">대기(TTE):</span>
+                                <span className="text-white font-medium">{metric?.tte}초</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">실행(TTC):</span>
+                                <span className="text-emerald-400 font-semibold">{metric?.ttc}초</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-gray-400 text-center bg-secondary/20 p-2 rounded-lg border border-border/40">
+                    최종 선택된 <span className="text-purple-300 font-bold">{analysisResult?.recommended_gpu}</span> 노드에 작업을 실행하시겠습니까?
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 justify-end border-t border-border pt-4">
+                  <Button size="default" className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold px-5 h-9 transition-all hover:scale-105 active:scale-95 shadow-md shadow-emerald-500/20" onClick={handleConfirmYes} disabled={loading}>
+                    승인 (Yes)
+                  </Button>
+                  <Button size="default" variant="secondary" className="font-bold px-5 h-9 transition-all hover:scale-105 active:scale-95" onClick={handleConfirmNo} disabled={loading}>
+                    취소 (No)
+                  </Button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
         {/* Left Side: Submit Form */}
         <div className="lg:col-span-6 space-y-6">
           <Card className="gradient-border glass">
@@ -467,18 +781,23 @@ export function SchedulerPage() {
                   />
                 </div>
                 
-                <div className="flex flex-wrap gap-2">
-                  {workloadPresets.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => handlePresetSelect(preset)}
-                      className="px-2.5 py-1 text-xs rounded-full bg-secondary/40 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
+
+                {isAnalyzing && (
+                  <div className="space-y-2 p-3 bg-purple-950/20 border border-purple-500/30 rounded-lg animate-pulse">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-purple-300 font-semibold flex items-center gap-1.5">
+                        <Activity className="w-3.5 h-3.5 animate-spin" /> MCDM 다기준 의사결정 모델 분석 중...
+                      </span>
+                      <span className="text-purple-400 font-bold">{analysisProgress}%</span>
+                    </div>
+                    <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-purple-500 to-blue-500 h-full transition-all duration-75"
+                        style={{ width: `${analysisProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <Button
                   type="submit"
@@ -597,7 +916,7 @@ export function SchedulerPage() {
       </div>
 
       {/* GPU Timelines (Gantt Charts) */}
-      <Card className="gradient-border glass">
+      <Card ref={timelineRef} className="gradient-border glass">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div>
@@ -718,19 +1037,34 @@ export function SchedulerPage() {
 
       {/* MCDM Score Breakdown & Radar Analogue */}
       {lastResult && (
-        <Card className="gradient-border glass">
+        <Card ref={detailsRef} className="gradient-border glass">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Info className="w-5 h-5 text-purple-400" /> MCDM 의사결정 수치 상세 분석
-            </CardTitle>
-            <CardDescription>
-              알고리즘 가중치(Fit: 60%, Perf: 15%, Cost: 15%, Power: 10%)가 각 노드별 지표에 대입된 계산 세부 내역입니다.
-            </CardDescription>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Info className="w-5 h-5 text-purple-400" /> MCDM 의사결정 수치 상세 분석
+                </CardTitle>
+                <CardDescription>
+                  {lastResult.use_cost_priority ? (
+                    <span className="text-emerald-400 font-semibold">
+                      비용 가중치 모드 적용 중 (Fit: 50%, Perf: 10%, Cost: 30%, Power: 10%)
+                    </span>
+                  ) : (
+                    <span>일반 가중치 모드 적용 중 (Fit: 60%, Perf: 15%, Cost: 15%, Power: 10%)</span>
+                  )}
+                </CardDescription>
+              </div>
+            </div>
           </CardHeader>
+
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {lastResult.mcdm_scores.map((score) => {
                 const isSelected = lastResult.recommended_gpu_id === score.gpu.id;
+                const costWeight = lastResult.use_cost_priority ? '30%' : '15%';
+                const fitWeight = lastResult.use_cost_priority ? '50%' : '60%';
+                const perfWeight = lastResult.use_cost_priority ? '10%' : '15%';
+                const powerWeight = lastResult.use_cost_priority ? '10%' : '10%';
                 
                 return (
                   <div
@@ -755,7 +1089,7 @@ export function SchedulerPage() {
                       {/* Fit */}
                       <div className="space-y-1">
                         <div className="flex justify-between text-[11px]">
-                          <span className="text-muted-foreground">자원 적합도 (Fit) - 60% 가중치</span>
+                          <span className="text-muted-foreground">자원 적합도 (Fit) - {fitWeight} 가중치</span>
                           <span className="font-semibold text-white">{Math.round(score.sfit)}점</span>
                         </div>
                         <div className="w-full bg-black/40 h-1.5 rounded-full overflow-hidden">
@@ -766,7 +1100,7 @@ export function SchedulerPage() {
                       {/* Performance */}
                       <div className="space-y-1">
                         <div className="flex justify-between text-[11px]">
-                          <span className="text-muted-foreground">성능 가중치 (Perf) - 15% 가중치</span>
+                          <span className="text-muted-foreground">성능 가중치 (Perf) - {perfWeight} 가중치</span>
                           <span className="font-semibold text-white">{Math.round(score.sperf)}점</span>
                         </div>
                         <div className="w-full bg-black/40 h-1.5 rounded-full overflow-hidden">
@@ -777,7 +1111,7 @@ export function SchedulerPage() {
                       {/* Cost */}
                       <div className="space-y-1">
                         <div className="flex justify-between text-[11px]">
-                          <span className="text-muted-foreground">비용 효율성 (Cost) - 15% 가중치</span>
+                          <span className="text-muted-foreground">비용 효율성 (Cost) - {costWeight} 가중치</span>
                           <span className="font-semibold text-white">{Math.round(score.scost)}점</span>
                         </div>
                         <div className="w-full bg-black/40 h-1.5 rounded-full overflow-hidden">
@@ -788,7 +1122,7 @@ export function SchedulerPage() {
                       {/* Power */}
                       <div className="space-y-1">
                         <div className="flex justify-between text-[11px]">
-                          <span className="text-muted-foreground">전력 효율성 (Power) - 10% 가중치</span>
+                          <span className="text-muted-foreground">전력 효율성 (Power) - {powerWeight} 가중치</span>
                           <span className="font-semibold text-white">{Math.round(score.spower)}점</span>
                         </div>
                         <div className="w-full bg-black/40 h-1.5 rounded-full overflow-hidden">
@@ -844,6 +1178,99 @@ export function SchedulerPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── 실제 GPU 접근 확인 모달 ── */}
+      <AnimatePresence>
+        {showConfirmModal && analysisData && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-2xl p-6 space-y-6"
+            >
+              {/* Header */}
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-primary/10 rounded-full text-primary animate-pulse shrink-0">
+                  <Cpu className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">
+                    실제 GPU 노드 실행 확인
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    분석 완료: 해당 워크로드를 실제 GPU에 배포할지 결정해주세요.
+                  </p>
+                </div>
+              </div>
+
+              {/* Workload Analysis Detail */}
+              <div className="bg-secondary/20 rounded-lg border border-border p-4 space-y-3">
+                <div className="flex justify-between items-center pb-2 border-b border-border/40">
+                  <span className="text-xs text-muted-foreground">워크로드명</span>
+                  <span className="font-semibold text-sm text-foreground">
+                    {analysisData.workload_name}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center pb-2 border-b border-border/40">
+                  <span className="text-xs text-muted-foreground">추천 GPU 노드</span>
+                  <Badge variant="outline" className="border-primary/50 text-primary bg-primary/5 px-2 py-0.5 text-xs font-bold">
+                    {analysisData.recommended_gpu} (MCDM 1위)
+                  </Badge>
+                </div>
+
+                {/* Metrics */}
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div className="bg-black/30 p-2.5 rounded border border-border/20 text-center">
+                    <span className="text-[10px] text-muted-foreground block">예상 대기 시간 (TTE)</span>
+                    <span className="text-sm font-bold text-amber-400">
+                      {analysisData.time_metrics && analysisData.time_metrics[analysisData.recommended_gpu_id]
+                        ? `${analysisData.time_metrics[analysisData.recommended_gpu_id].tte}초`
+                        : '0초'}
+                    </span>
+                  </div>
+                  <div className="bg-black/30 p-2.5 rounded border border-border/20 text-center">
+                    <span className="text-[10px] text-muted-foreground block">예상 연산 시간 (TTC)</span>
+                    <span className="text-sm font-bold text-emerald-400">
+                      {analysisData.time_metrics && analysisData.time_metrics[analysisData.recommended_gpu_id]
+                        ? `${analysisData.time_metrics[analysisData.recommended_gpu_id].ttc}초`
+                        : '0초'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Warning/Info Text */}
+              <div className="flex gap-2.5 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-200/90 leading-relaxed">
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <div>
+                  <strong>주의:</strong> &quot;예&quot;를 누르면 실제 물리 자원({analysisData.recommended_gpu})에 접근하며, 
+                  스케줄러 대기열에 작업이 즉시 등록되어 간트차트에 표시됩니다.
+                </div>
+              </div>
+
+              {/* Footer Actions */}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={handleCancelExecute}
+                  className="border-border hover:bg-secondary/80 text-foreground"
+                >
+                  아니오 (취소)
+                </Button>
+                <Button
+                  onClick={handleConfirmExecute}
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 hover:opacity-90 text-white font-medium"
+                >
+                  예 (실제 실행)
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

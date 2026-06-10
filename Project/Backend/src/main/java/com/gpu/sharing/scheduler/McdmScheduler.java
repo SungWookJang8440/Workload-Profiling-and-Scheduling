@@ -8,10 +8,10 @@ import java.util.Map;
 public class McdmScheduler {
 
     private final List<SchedulerData.GPU> gpus;
-    private final double wPerf;
-    private final double wFit;
-    private final double wCost;
-    private final double wPower;
+    private double wPerf;
+    private double wFit;
+    private double wCost;
+    private double wPower;
 
     public static class ScoreDetail {
         private final SchedulerData.GPU gpu;
@@ -143,7 +143,19 @@ public class McdmScheduler {
         return g.getWatts() > 0 ? throughput / Math.pow(g.getWatts(), 2) : 0.0;
     }
 
-    public List<ScoreDetail> computeScores(String workloadId, Map<String, Double> dynamicThroughputs) {
+    public List<ScoreDetail> computeScores(String workloadId, Map<String, Double> dynamicThroughputs, boolean useCostPriority) {
+        if (useCostPriority) {
+            this.wPerf = 0.10;
+            this.wFit = 0.50;
+            this.wCost = 0.30;
+            this.wPower = 0.10;
+        } else {
+            this.wPerf = 0.15;
+            this.wFit = 0.60;
+            this.wCost = 0.15;
+            this.wPower = 0.10;
+        }
+
         List<ScoreDetail> details = new ArrayList<>();
         for (SchedulerData.GPU gpu : gpus) {
             double sPerf = scorePerformance(gpu.getId(), dynamicThroughputs);
@@ -165,6 +177,11 @@ public class McdmScheduler {
 
         details.sort(Comparator.comparingDouble(ScoreDetail::getSTotal).reversed());
         return details;
+    }
+
+    // Overloaded method to keep compatibility with existing calls
+    public List<ScoreDetail> computeScores(String workloadId, Map<String, Double> dynamicThroughputs) {
+        return computeScores(workloadId, dynamicThroughputs, false);
     }
 
     private double round(double val) {

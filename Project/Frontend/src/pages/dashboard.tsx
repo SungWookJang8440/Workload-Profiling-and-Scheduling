@@ -10,6 +10,9 @@ import {
   ExternalLink,
   AlertCircle,
   Loader2,
+  Eye,
+  EyeOff,
+  Copy,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,6 +48,7 @@ function ContainerCard({ container, onDelete }: { container: Container; onDelete
 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleDelete = async () => {
     setIsDeleting(true);
@@ -132,19 +136,43 @@ function ContainerCard({ container, onDelete }: { container: Container; onDelete
             <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30">
               <div>
                 <span className="text-sm text-muted-foreground">비밀번호</span>
-                <p className="text-sm font-mono">{container.ssh_password}</p>
+                <p className="text-sm font-mono">{showPassword ? container.ssh_password : '••••••••'}</p>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => copyToClipboard(container.ssh_password, '비밀번호')}
-              >
-                복사
-              </Button>
+              <div className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="h-8 w-8 p-0"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4 text-muted-foreground" /> : <Eye className="w-4 h-4 text-muted-foreground" />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyToClipboard(container.ssh_password, '비밀번호')}
+                  className="h-8 w-8 p-0"
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           )}
 
           <div className="flex gap-2">
+            {container.jupyter_port_mapped && (
+              <a
+                href={`http://localhost:${container.jupyter_port_mapped}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1"
+              >
+                <Button variant="outline" size="sm" className="w-full">
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  Jupyter
+                </Button>
+              </a>
+            )}
             <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
               <DialogTrigger asChild>
                 <Button variant="destructive" size="sm" className="flex-1">
