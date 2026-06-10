@@ -91,6 +91,7 @@ public class QueueManager {
     }
 
     public synchronized Map<String, Object> analyzeJob(String workloadId, String originalInput) {
+    public synchronized Map<String, Object> analyzeJob(String workloadId) {
         String jobName = SchedulerData.WORKLOADS.stream()
                 .filter(w -> w.getId().equals(workloadId))
                 .map(SchedulerData.Workload::getName)
@@ -140,8 +141,49 @@ public class QueueManager {
         String chosenGpuName = bestMcdm.getGpu().getName();
         double bestMcdmScore = bestMcdm.getSTotal();
 
-        double chosenGpuTtc = (double) timeMetrics.get(chosenGpuId).get("ttc");
-        double chosenGpuTte = (double) timeMetrics.get(chosenGpuId).get("tte");
+        Map<String, Object> result = new HashMap<>();
+        result.put("workload_id", workloadId);
+        result.put("workload_name", jobName);
+        result.put("recommended_gpu", chosenGpuName);
+        result.put("recommended_gpu_id", chosenGpuId);
+        result.put("recommended_gpu_score", bestMcdmScore);
+        result.put("mcdm_scores", scores);
+        result.put("time_metrics", timeMetrics);
+
+        return result;
+    }
+
+    public synchronized Map<String, Object> executeJob(String workloadId, String chosenGpuId) {
+        String jobName = SchedulerData.WORKLOADS.stream()
+                .filter(w -> w.getId().equals(workloadId))
+                .map(SchedulerData.Workload::getName)
+                .findFirst()
+                .orElse("Custom Workload");
+
+        String jobId = "job-" + (++jobCounter);
+        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss");
+
+        double chosenGpuTtc = SchedulerData.LATENCY_MATRIX.getOrDefault(workloadId, Map.of()).getOrDefault(chosenGpuId, 1.0);
+        double chosenGpuTte = gpuStates.get(chosenGpuId).getTotalPendingTime();
+
+        // Calculate score for display log
+        Map<String, Double> dynamicThroughputs = new HashMap<>();
+        for (SchedulerData.GPU gpu : SchedulerData.GPUS) {
+            String gId = gpu.getId();
+            double staticThroughput = SchedulerData.PERF_MATRIX.getOrDefault(workloadId, Map.of()).getOrDefault(gId, 0.0);
+            double ttc = SchedulerData.LATENCY_MATRIX.getOrDefault(workloadId, Map.of()).getOrDefault(gId, 1.0);
+            double tte = gpuStates.get(gId).getTotalPendingTime();
+            double totalTime = tte + ttc;
+            double totalSamples = staticThroughput * ttc;
+            double dynamicThroughput = (totalTime > 0) ? (totalSamples / totalTime) : 0.0;
+            dynamicThroughputs.put(gId, dynamicThroughput);
+        }
+        List<McdmScheduler.ScoreDetail> scores = scheduler.computeScores(workloadId, dynamicThroughputs);
+        double bestMcdmScore = scores.stream()
+            .filter(s -> s.getGpu().getId().equals(chosenGpuId))
+            .mapToDouble(McdmScheduler.ScoreDetail::getSTotal)
+            .findFirst()
+            .orElse(0.0);
 
         String decisionLog;
         if (chosenGpuTte > 0) {
@@ -153,6 +195,13 @@ public class QueueManager {
             decisionLog = String.format(
                 "[%s] %s 작업이 분석되었습니다. 현재 즉시 실행이 가능한 %s 노드(점수: %.0f점)가 최적으로 판단되었습니다.",
                 LocalDateTime.now().format(timeFormatter), jobName, chosenGpuName, bestMcdmScore
+                "[%s] %s 작업이 접수되었습니다. 각 GPU의 실시간 대기열(Queue) 시간을 성능 패널티로 환산하여 MCDM 알고리즘을 분석한 결과, 최종적으로 %s 노드가 최적(점수: %.0f점, 대기 시간: %.1f초)으로 판단되어 할당되었습니다.",
+                LocalDateTime.now().format(timeFormatter), jobName, gpuStates.get(chosenGpuId).getGpuName(), bestMcdmScore, chosenGpuTte
+            );
+        } else {
+            decisionLog = String.format(
+                "[%s] %s 작업이 접수되었습니다. 현재 쾌적한 상태로 즉시 실행이 가능한 %s 노드(점수: %.0f점)로 최종 할당(Routing) 하였습니다.",
+                LocalDateTime.now().format(timeFormatter), jobName, gpuStates.get(chosenGpuId).getGpuName(), bestMcdmScore
             );
         }
 
@@ -212,12 +261,12 @@ public class QueueManager {
                 realGpuConnected = sent;
                 realGpuLog = sent
                     ? String.format("[%s] [실제 GPU 실행] %s 작업이 %s 서버(%s)에 실제로 전달되었습니다.",
-                        LocalDateTime.now().format(timeFormatter), jobName, chosenGpuName, workerUrl)
+                        LocalDateTime.now().format(timeFormatter), jobName, gpuStates.get(chosenGpuId).getGpuName(), workerUrl)
                     : String.format("[%s] [경고] %s Worker 전송 실패. 시뮬레이션 대체.",
-                        LocalDateTime.now().format(timeFormatter), chosenGpuName);
+                        LocalDateTime.now().format(timeFormatter), gpuStates.get(chosenGpuId).getGpuName());
             } else {
                 realGpuLog = String.format("[%s] [경고] %s 서버(%s) 연결 실패. 시뮬레이션 대체.",
-                    LocalDateTime.now().format(timeFormatter), chosenGpuName, workerUrl);
+                    LocalDateTime.now().format(timeFormatter), gpuStates.get(chosenGpuId).getGpuName(), workerUrl);
             }
             if (realGpuLog != null) decisionLogs.add(0, realGpuLog);
         }
@@ -226,7 +275,7 @@ public class QueueManager {
         result.put("job_id", jobId);
         result.put("workload_id", workloadId);
         result.put("workload_name", jobName);
-        result.put("recommended_gpu", chosenGpuName);
+        result.put("recommended_gpu", gpuStates.get(chosenGpuId).getGpuName());
         result.put("recommended_gpu_id", chosenGpuId);
         result.put("decision_log", decisionLog);
         result.put("real_gpu_connected", realGpuConnected);
