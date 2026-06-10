@@ -38,19 +38,42 @@ public class SchedulerController {
         public void setPrompt(String prompt) { this.prompt = prompt; }
     }
 
-    @PostMapping("/submit")
-    public ResponseEntity<Map<String, Object>> submitJob(@RequestBody SubmitRequest request) {
+    public static class ExecuteRequest {
+        private String workloadId;
+        private String prompt;
+        private String chosenGpuId;
+        private double chosenGpuTtc;
+
+        public String getWorkloadId() { return workloadId; }
+        public void setWorkloadId(String workloadId) { this.workloadId = workloadId; }
+        public String getPrompt() { return prompt; }
+        public void setPrompt(String prompt) { this.prompt = prompt; }
+        public String getChosenGpuId() { return chosenGpuId; }
+        public void setChosenGpuId(String chosenGpuId) { this.chosenGpuId = chosenGpuId; }
+        public double getChosenGpuTtc() { return chosenGpuTtc; }
+        public void setChosenGpuTtc(double chosenGpuTtc) { this.chosenGpuTtc = chosenGpuTtc; }
+    }
+
+    @PostMapping("/analyze")
+    public ResponseEntity<Map<String, Object>> analyzeJob(@RequestBody SubmitRequest request) {
         String prompt = request.getPrompt();
         if (prompt == null || prompt.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Workload prompt cannot be empty"));
         }
 
-        // Step 1: Map the natural language prompt to a workload ID (using Gemini / local fallback)
         String workloadId = geminiParsingService.parseWorkload(prompt);
-        System.out.println("Mapped prompt '" + prompt + "' to workload ID: " + workloadId);
+        Map<String, Object> result = queueManager.analyzeJob(workloadId, prompt);
+        return ResponseEntity.ok(result);
+    }
 
-        // Step 2: Queue the job and compute MCDM scores and load-balancing decisions
-        Map<String, Object> result = queueManager.submitJob(workloadId, prompt);
+    @PostMapping("/submit")
+    public ResponseEntity<Map<String, Object>> submitJob(@RequestBody ExecuteRequest request) {
+        Map<String, Object> result = queueManager.commitJob(
+            request.getWorkloadId(),
+            request.getPrompt(),
+            request.getChosenGpuId(),
+            request.getChosenGpuTtc()
+        );
         return ResponseEntity.ok(result);
     }
 

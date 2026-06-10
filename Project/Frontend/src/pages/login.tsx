@@ -36,15 +36,6 @@ export function LoginPage() {
           <p className="text-muted-foreground">AI/ML 개발환경을 빠르게 구성하세요</p>
         </div>
 
-        <div className="mb-4">
-          <p className="text-xs text-red-400 mb-1">테스트: 아래 입력이 되면 React 문제, 안 되면 CSS 문제</p>
-          <input 
-            type="text" 
-            placeholder="원시 HTML input 테스트"
-            className="w-full p-2 border border-red-500 rounded bg-white text-black"
-            onChange={(e) => console.log('raw input:', e.target.value)}
-          />
-        </div>
 
         <Card className="border-0 shadow-2xl">
           <CardHeader className="space-y-1">
